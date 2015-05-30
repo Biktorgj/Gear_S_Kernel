@@ -1,0 +1,7 @@
+config CLK_MON
+	bool "Clock Gate Mornitor"
+	depends on ARCH_MSM=y
+	default y
+	help
+		Say Y to here to enable Clock Gate Mornitor driver for
+		profiling Clock Gating and Power Domains.

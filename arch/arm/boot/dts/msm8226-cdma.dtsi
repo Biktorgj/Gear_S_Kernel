@@ -1,0 +1,25 @@
+/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+
+&soc {
+	memory_hole: qcom,msm-mem-hole {
+		compatible = "qcom,msm-mem-hole";
+		qcom,memblock-remove = <0x08400000 0x4000000 /* Address and Size of Hole for Modem and MBA 64M */
+					0x0d800000 0x1900000 /* Address and Size of Hole for LPASS 20M, Venus 5M */
+					0x0f800000 0x900000>; /* Address and Size of Hole for ABOOT 2M, SMEM 2M, TZ ADSP/Modem EFS 3M, SEC DEBUG 2M */
+	};
+
+
+};
+
+

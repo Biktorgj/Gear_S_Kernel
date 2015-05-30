@@ -1,0 +1,40 @@
+/*
+** DRV2604 register settings for initialization of SEMCO0934 LRA
+**
+** $Revision: 35184 $
+*/
+
+
+0x00, 0xC0, /*Device ID / Readback*/
+0x01, 0x00, /* Mode*/
+0x02, 0x7F, /*Real-Time Playback Input*/
+0x03, 0x00, /*Library Selection*/
+0x04, 0x01, /*Waveform Sequencer 1*/
+0x05, 0x00, /*Waveform Sequencer 2*/
+0x06, 0x00, /*Waveform Sequencer 3*/
+0x07, 0x00, /*Waveform Sequencer 4*/
+0x08, 0x00, /*Waveform Sequencer 5*/
+0x09, 0x00, /*Waveform Sequencer 6*/
+0x0A, 0x00, /*Waveform Sequencer 7*/
+0x0B, 0x00, /*Waveform Sequencer 8*/
+0x0C, 0x00, /*GO*/
+0x0D, 0x00, /*OverDrive Time Offset*/
+0x0E, 0x00, /*Sustain Time Offset, Postive*/
+0x0F, 0x00, /*Sustain Time Offset, Negative*/
+0x10, 0x00, /*Brake Time Offset*/
+0x11, 0x05, /*Audio To Haptics Control*/
+0x12, 0x19, /*Audio To Haptics Minimum Input Level*/
+0x13, 0xFF, /*Audio To Haptics Maximum Input Level*/
+0x14, 0x19, /*Audio To Haptics Minimum Output Drive*/
+0x15, 0xFF, /*Audio To Haptics Maximum Output Drive*/
+0x16, 0x60, /*Rated Voltage*/
+0x17, 0x60, /*OverDrive Clamp Voltage*/
+0x18, 0x05, /*Auto Calibration Compensation Result*/
+0x19, 0xFF, /*Auto Calibration Back-EMF Result*/
+0x1A, 0xC6, /*Feedback Control*/
+0x1B, 0x93, /*Control1*/
+0x1C, 0xFF, /*Control2*/
+0x1D, 0x81, /*Control3*/
+0x1E, 0x30, /*Auto Calibration Memory Interface & ZC Detect Time*/
+0x1F, 0x6C, /*Auto Open Loop, Playback Interval, IDISS, and Blanking Times*/
+0x20, 0x35, /*Open Loop LRA Period*/
