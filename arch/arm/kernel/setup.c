@@ -950,7 +950,8 @@ void __init setup_arch(char **cmdline_p)
 	char recoverymode[]="systemd.unit=recovery-mode.target";
 	char chargemode[]="systemd.unit=charging-mode.target";
 	char normalboot[]="root=/dev/mmcblk0p19 "; // ramdisk-recovery partition label
-	char recoveryboot[]="root=/dev/mmcblk0p22 "; // CSC Partition
+	char chargeboot[]="root=/dev/mmcblk0p19 androidboot.mode=charger "; // ramdisk-recovery partition label
+	char recoveryboot[]="root=/dev/mmcblk0p22 androidboot.boot_recovery=1 "; // CSC Partition
 	char fsoptions[]=" rw rootfstype=ext4 rootwait ";
 	char sec_options[]="sec_log=0x100000@0xff00008 sec_dbg=0x40000@0x10000008 sec_debug.reset_reason=0x1a2b3c00 lcd_id=0x410014 lcd_attached=1 sec_debug.enable=0 sec_debug.enable_user=0 sec_debug.enable_cp_debug=0 vmalloc=450m androidboot.";
 	char console_settings[]="console=ram loglevel=4 no_console_suspend pwron=0x20000200c1 bootloader.ver=R750XXU1BNJ7 tizenboot.baseband=msm mdss_mdp.panel=splash:dsi:0::qcom,mdss_dsi_samsung_oled_360p_cmd androidboot.selinux=disabled ";
@@ -1002,7 +1003,7 @@ void __init setup_arch(char **cmdline_p)
 			printk ("\n** Low Power Charge Mode **\n"); 
 			// boot in charge mode
 			strlcpy(cmd_line, console_settings, COMMAND_LINE_SIZE);
-			strlcat(cmd_line, recoveryboot, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, chargeboot, COMMAND_LINE_SIZE);
 			strlcat(cmd_line, fsoptions, COMMAND_LINE_SIZE);
 			strlcat(cmd_line, sec_options, COMMAND_LINE_SIZE);
 			strlcat(cmd_line, cmdline_end, COMMAND_LINE_SIZE);

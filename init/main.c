@@ -427,11 +427,19 @@ static int __init do_early_param(char *param, char *val)
 				boot_mode_recovery = 1;
 			}
 	}
+	if ((strncmp(param, "systemd.unit", 12) == 0)) {
+		if (strncmp(val, "recovery-mode.target", 20) == 0){
+			poweroff_charging = 1;
+			boot_mode_recovery = 1;
+			}
+	}
 #ifdef CONFIG_SAMSUNG_LPM_MODE
 	/* check power off charging */
 	if ((strncmp(param, "systemd.unit", 12) == 0)) {
-		if (strncmp(val, "charging-mode.target", 20) == 0)
+		if (strncmp(val, "charging-mode.target", 20) == 0){
 			poweroff_charging = 1;
+			boot_mode_lpm = 1;
+			}
 	}
 #endif
 	return 0;
