@@ -114,7 +114,9 @@ EXPORT_SYMBOL(system_state);
 #ifdef CONFIG_SAMSUNG_LPM_MODE
 int poweroff_charging;
 #endif
-
+int boot_mode_lpm;
+int boot_mode_recovery;
+EXPORT_SYMBOL(boot_mode_recovery);
 /*
  * Boot command-line arguments
  */
@@ -410,6 +412,21 @@ static int __init do_early_param(char *param, char *val)
 		}
 	}
 	/* We accept everything at this stage. */
+		/* Check LPM(Power Off Charging) Mode */
+	if ((strncmp(param, "androidboot.mode", 17) == 0)) {
+		if (strncmp(val, "charger", 7) == 0) {
+			pr_info("LPM Boot Mode \n");
+			boot_mode_lpm = 1;
+		}
+	}
+	/* Check Recovery Mode , 1: recovery mode, 2: factory reset mode(recovery)
+	                         otherwise normal mode*/
+	if ((strncmp(param, "androidboot.boot_recovery", 26) == 0)) {
+	        if ((strncmp(val, "1", 1) == 0)||(strncmp(val, "2", 1) == 0)) {
+				pr_info("Recovery Boot Mode \n");
+				boot_mode_recovery = 1;
+			}
+	}
 #ifdef CONFIG_SAMSUNG_LPM_MODE
 	/* check power off charging */
 	if ((strncmp(param, "systemd.unit", 12) == 0)) {

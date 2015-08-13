@@ -47,17 +47,15 @@
 #include <linux/user_namespace.h>
 
 #include <linux/kmsg_dump.h>
+#ifdef CONFIG_SEC_DEBUG
+#include <mach/sec_debug.h>
+#endif
 /* Move somewhere else to avoid recompiling? */
 #include <generated/utsrelease.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/unistd.h>
-
-
-#define __POWEROFF_WATCHDOG__
-//#define __POWEROFF_WATCHDOG_PANIC_
-
 
 #ifndef SET_UNALIGN_CTL
 # define SET_UNALIGN_CTL(a,b)	(-EINVAL)
@@ -127,6 +125,54 @@ EXPORT_SYMBOL(cad_pid);
  */
 
 void (*pm_power_off_prepare)(void);
+
+#if defined CONFIG_SEC_RESTRICT_SETUID
+int sec_check_execpath(struct mm_struct *mm, char *denypath);
+#if defined CONFIG_SEC_RESTRICT_ROOTING_LOG
+#define PRINT_LOG(...)	printk(KERN_ERR __VA_ARGS__)
+#else
+#define PRINT_LOG(...)
+#endif	// End of CONFIG_SEC_RESTRICT_ROOTING_LOG
+
+static int sec_restrict_uid(void)
+{
+	int ret = 0;
+	struct task_struct *parent_tsk;
+	const struct cred *parent_cred;
+
+	read_lock(&tasklist_lock);
+	parent_tsk = current->parent;
+	if (!parent_tsk) {
+		read_unlock(&tasklist_lock);
+		return 0;
+	}
+
+	get_task_struct(parent_tsk);
+	/* holding on to the task struct is enough so just release
+	 * the tasklist lock here */
+	read_unlock(&tasklist_lock);
+
+	parent_cred = get_task_cred(parent_tsk);
+	if (!parent_cred)
+		goto out;
+	if (parent_cred->euid == 0 || parent_tsk->pid == 1) {
+		ret = 0;
+	} else if (sec_check_execpath(current->mm, "/system/bin/pppd")) {
+		PRINT_LOG("VPN allowed to use root permission");
+		ret = 0;
+	} else {
+		PRINT_LOG("Restricted changing UID. PID = %d(%s) PPID = %d(%s)\n",
+			current->pid, current->comm,
+			parent_tsk->pid, parent_tsk->comm);
+		ret = 1;
+	}
+	put_cred(parent_cred);
+out:
+	put_task_struct(parent_tsk);
+
+	return ret;
+}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
 
 /*
  * Returns true if current's euid is same as p's uid or euid,
@@ -319,39 +365,6 @@ void emergency_restart(void)
 }
 EXPORT_SYMBOL_GPL(emergency_restart);
 
-
-#if defined (__POWEROFF_WATCHDOG__)
-static struct timer_list poweroff_watchdog_timer;
-char temp_cmd[30];
-
-#define POWEROFF_WDOG_TIME 10 /* seconds */
-
-#define POWEROFF_TYPE_RESTART	0
-#define POWEROFF_TYPE_OFF		1
-
-static void __poweroff_watchdog_expired(unsigned long type)
-{
-
-	printk(KERN_EMERG "%s: Fail to power off. type=%ld, cmd=%s comm=%s\n", __func__, type, temp_cmd, current->comm);
-
-#if defined (__POWEROFF_WATCHDOG_PANIC_)
-	panic("Fail to power off");
-#endif
-
-	switch (type) {
-		case POWEROFF_TYPE_RESTART:
-			machine_restart(temp_cmd);
-			break;
-
-		case POWEROFF_TYPE_OFF:
-			machine_power_off();
-			break;
-	}
-
-	return;
-}
-#endif
-
 void kernel_restart_prepare(char *cmd)
 {
 	blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, cmd);
@@ -402,17 +415,9 @@ EXPORT_SYMBOL(unregister_reboot_notifier);
  */
 void kernel_restart(char *cmd)
 {
-
-#if defined (__POWEROFF_WATCHDOG__)
-	init_timer(&poweroff_watchdog_timer);
-	poweroff_watchdog_timer.function = __poweroff_watchdog_expired;
-	poweroff_watchdog_timer.expires = jiffies + POWEROFF_WDOG_TIME*HZ;
-	poweroff_watchdog_timer.data = POWEROFF_TYPE_RESTART;
-	if (cmd)
-		strncpy(temp_cmd, cmd, sizeof(temp_cmd));
-	add_timer(&poweroff_watchdog_timer);
+#ifdef CONFIG_SEC_MONITOR_BATTERY_REMOVAL
+	kernel_sec_set_normal_pwroff(1);
 #endif
-
 	kernel_restart_prepare(cmd);
 	if (!cmd)
 		printk(KERN_EMERG "Restarting system.\n");
@@ -454,15 +459,9 @@ EXPORT_SYMBOL_GPL(kernel_halt);
  */
 void kernel_power_off(void)
 {
-
-#if defined (__POWEROFF_WATCHDOG__)
-	init_timer(&poweroff_watchdog_timer);
-	poweroff_watchdog_timer.function = __poweroff_watchdog_expired;
-	poweroff_watchdog_timer.expires = jiffies + POWEROFF_WDOG_TIME*HZ;
-	poweroff_watchdog_timer.data = POWEROFF_TYPE_OFF;
-	add_timer(&poweroff_watchdog_timer);
+#ifdef CONFIG_SEC_MONITOR_BATTERY_REMOVAL
+	kernel_sec_set_normal_pwroff(1);
 #endif
-
 	kernel_shutdown_prepare(SYSTEM_POWER_OFF);
 	if (pm_power_off_prepare)
 		pm_power_off_prepare();
@@ -615,6 +614,14 @@ SYSCALL_DEFINE2(setregid, gid_t, rgid, gid_t, egid)
 	struct cred *new;
 	int retval;
 
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(rgid == 0 || egid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
+
 	new = prepare_creds();
 	if (!new)
 		return -ENOMEM;
@@ -661,6 +668,14 @@ SYSCALL_DEFINE1(setgid, gid_t, gid)
 	const struct cred *old;
 	struct cred *new;
 	int retval;
+
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(gid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
 
 	new = prepare_creds();
 	if (!new)
@@ -732,6 +747,14 @@ SYSCALL_DEFINE2(setreuid, uid_t, ruid, uid_t, euid)
 	struct cred *new;
 	int retval;
 
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(ruid == 0 || euid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
+
 	new = prepare_creds();
 	if (!new)
 		return -ENOMEM;
@@ -793,6 +816,14 @@ SYSCALL_DEFINE1(setuid, uid_t, uid)
 	struct cred *new;
 	int retval;
 
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(uid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
+
 	new = prepare_creds();
 	if (!new)
 		return -ENOMEM;
@@ -833,6 +864,14 @@ SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
 	const struct cred *old;
 	struct cred *new;
 	int retval;
+
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(ruid == 0 || euid == 0 || suid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
 
 	new = prepare_creds();
 	if (!new)
@@ -898,6 +937,14 @@ SYSCALL_DEFINE3(setresgid, gid_t, rgid, gid_t, egid, gid_t, sgid)
 	const struct cred *old;
 	struct cred *new;
 	int retval;
+
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(rgid == 0 || egid == 0 || sgid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
 
 	new = prepare_creds();
 	if (!new)
@@ -1256,7 +1303,7 @@ static int override_release(char __user *release, size_t len)
 			rest++;
 		}
 		v = ((LINUX_VERSION_CODE >> 8) & 0xff) + 40;
-		copy = min(sizeof(buf), max_t(size_t, 1, len));
+		copy = clamp_t(size_t, len, 1, sizeof(buf));
 		copy = scnprintf(buf, copy, "2.6.%u%s", v, rest);
 		ret = copy_to_user(release, buf, copy + 1);
 	}
@@ -1984,9 +2031,6 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			break;
 		case PR_GET_TIMERSLACK:
 			error = current->timer_slack_ns;
-			break;
-		case PR_GET_EFFECTIVE_TIMERSLACK:
-			error = task_get_effective_timer_slack(current);
 			break;
 		case PR_SET_TIMERSLACK:
 			if (arg2 <= 0)

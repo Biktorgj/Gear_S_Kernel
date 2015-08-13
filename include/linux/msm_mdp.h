@@ -195,6 +195,7 @@ enum {
 #define MDP_MEMORY_ID_TYPE_FB		0x00001000
 #define MDP_BWC_EN			0x00000400
 #define MDP_DECIMATION_EN		0x00000800
+#define MDP_SMP_FORCE_ALLOC            0x00200000
 #define MDP_TRANSP_NOP 0xffffffff
 #define MDP_ALPHA_NOP 0xff
 
@@ -432,13 +433,13 @@ struct mdp_pa_v2_data {
 	uint32_t global_sat_adj;
 	uint32_t global_val_adj;
 	uint32_t global_cont_adj;
+	uint32_t six_zone_len;
+	uint32_t *six_zone_curve_p0;
+	uint32_t *six_zone_curve_p1;
+	uint32_t six_zone_thresh;
 	struct mdp_pa_mem_col_cfg skin_cfg;
 	struct mdp_pa_mem_col_cfg sky_cfg;
 	struct mdp_pa_mem_col_cfg fol_cfg;
-	uint32_t six_zone_len;
-	uint32_t six_zone_thresh;
-	uint32_t *six_zone_curve_p0;
-	uint32_t *six_zone_curve_p1;
 };
 
 struct mdp_igc_lut_data {
@@ -530,6 +531,23 @@ struct mdp_scale_data {
 };
 
 /**
+ * enum mdp_overlay_pipe_type - Different pipe type set by userspace
+ *
+ * @PIPE_TYPE_AUTO:    Not specified, pipe will be selected according to flags.
+ * @PIPE_TYPE_VIG:     VIG pipe.
+ * @PIPE_TYPE_RGB:     RGB pipe.
+ * @PIPE_TYPE_DMA:     DMA pipe.
+ * @PIPE_TYPE_MAX:     Used to track maximum number of pipe type.
+ */
+enum mdp_overlay_pipe_type {
+        PIPE_TYPE_AUTO = 0,
+        PIPE_TYPE_VIG,
+        PIPE_TYPE_RGB,
+        PIPE_TYPE_DMA,
+        PIPE_TYPE_MAX,
+};
+
+/**
  * struct mdp_overlay - overlay surface structure
  * @src:	Source image information (width, height, format).
  * @src_rect:	Source crop rectangle, portion of image that will be fetched.
@@ -551,6 +569,7 @@ struct mdp_scale_data {
  *		The color should be in same format as the source image format.
  * @flags:	This is used to customize operation of overlay. See MDP flags
  *		for more information.
+ * @pipe_type:  Used to specify the type of overlay pipe.
  * @user_data:	DEPRECATED* Used to store user application specific information.
  * @bg_color:	Solid color used to fill the overlay surface when no source
  *		buffer is provided.
@@ -583,6 +602,7 @@ struct mdp_overlay {
 	uint32_t blend_op;
 	uint32_t transp_mask;
 	uint32_t flags;
+	uint32_t pipe_type;
 	uint32_t id;
 	uint32_t user_data[6];
 	uint32_t bg_color;
@@ -812,6 +832,7 @@ enum {
 
 #define MDSS_MAX_BL_BRIGHTNESS 255
 #define AD_BL_LIN_LEN 256
+#define AD_BL_ATT_LUT_LEN 33
 
 #define MDSS_AD_MODE_AUTO_BL	0x0
 #define MDSS_AD_MODE_AUTO_STR	0x1
@@ -840,9 +861,13 @@ struct mdss_ad_init {
 	uint16_t frame_h;
 	uint8_t logo_v;
 	uint8_t logo_h;
+	uint32_t alpha;
+	uint32_t alpha_base;
 	uint32_t bl_lin_len;
+	uint32_t bl_att_len;
 	uint32_t *bl_lin;
 	uint32_t *bl_lin_inv;
+	uint32_t *bl_att_lut;
 };
 
 #define MDSS_AD_BL_CTRL_MODE_EN 1
@@ -1084,7 +1109,6 @@ int msm_fb_writeback_dequeue_buffer(struct fb_info *info,
 int msm_fb_writeback_stop(struct fb_info *info);
 int msm_fb_writeback_terminate(struct fb_info *info);
 int msm_fb_writeback_set_secure(struct fb_info *info, int enable);
-int msm_fb_writeback_iommu_ref(struct fb_info *info, int enable);
 #endif
 
 #endif /*_MSM_MDP_H_*/

@@ -741,6 +741,7 @@ __tagtable(ATAG_REVISION, parse_tag_revision);
 
 static int __init parse_tag_cmdline(const struct tag *tag)
 {
+	
 #if defined(CONFIG_CMDLINE_EXTEND)
 	strlcat(default_command_line, " ", COMMAND_LINE_SIZE);
 	strlcat(default_command_line, tag->u.cmdline.cmdline,
@@ -945,7 +946,17 @@ static int __init meminfo_cmp(const void *_a, const void *_b)
 void __init setup_arch(char **cmdline_p)
 {
 	struct machine_desc *mdesc;
-
+	/* Hijack the commandline before it boots */
+	char recoverymode[]="systemd.unit=recovery-mode.target";
+	char chargemode[]="systemd.unit=charging-mode.target";
+	char normalboot[]="root=/dev/mmcblk0p19 "; // ramdisk-recovery partition label
+	char recoveryboot[]="root=/dev/mmcblk0p22 "; // CSC Partition
+	char fsoptions[]=" rw rootfstype=ext4 rootwait ";
+	char sec_options[]="sec_log=0x100000@0xff00008 sec_dbg=0x40000@0x10000008 sec_debug.reset_reason=0x1a2b3c00 lcd_id=0x410014 lcd_attached=1 sec_debug.enable=0 sec_debug.enable_user=0 sec_debug.enable_cp_debug=0 vmalloc=450m androidboot.";
+	char console_settings[]="console=ram loglevel=4 no_console_suspend pwron=0x20000200c1 bootloader.ver=R750XXU1BNJ7 tizenboot.baseband=msm mdss_mdp.panel=splash:dsi:0::qcom,mdss_dsi_samsung_oled_360p_cmd androidboot.selinux=disabled ";
+	char cmdline_end[256]="\0";
+	char *serialnumber;
+	/* Defs end */
 	setup_processor();
 	mdesc = setup_machine_fdt(__atags_pointer);
 	if (!mdesc)
@@ -966,7 +977,54 @@ void __init setup_arch(char **cmdline_p)
 	init_mm.end_data   = (unsigned long) _edata;
 	init_mm.brk	   = (unsigned long) _end;
 
+/* Pick the boot command line */
+	serialnumber=strstr(boot_command_line, "serialno");
+	if (serialnumber!=NULL) // If you can read the serialnumber, pick it
+		{ 	//always dest, source, size
+			strlcpy(cmdline_end, serialnumber, sizeof(cmdline_end));
+		}
+	else // If you don't, act like you did
+		{
+			strlcpy(cmdline_end, "serialno=012345678", sizeof(cmdline_end));
+		}
+	if (strstr(boot_command_line,recoverymode)!=NULL)
+		{
+			printk("\n** Recovery Mode **\n");
+			// boot in recovery mode
+			strlcpy(cmd_line, console_settings, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, recoveryboot, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, fsoptions, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, sec_options, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, cmdline_end, COMMAND_LINE_SIZE);
+		}
+	else if (strstr(boot_command_line,chargemode)!=NULL)
+		{
+			printk ("\n** Low Power Charge Mode **\n"); 
+			// boot in charge mode
+			strlcpy(cmd_line, console_settings, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, recoveryboot, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, fsoptions, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, sec_options, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, cmdline_end, COMMAND_LINE_SIZE);
+		}
+	else 
+		{
+			printk ("\n** Normal Boot Mode (default)**\n");
+			// Normal boot
+			strlcpy(cmd_line, console_settings, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, normalboot, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, fsoptions, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, sec_options, COMMAND_LINE_SIZE);
+			strlcat(cmd_line, cmdline_end, COMMAND_LINE_SIZE);
+		}
+	printk("\n** Hijacked Command line: %s **\n", cmd_line);
+	printk ("\n** Default command line: %s **", boot_command_line);
+	/* END HIJACK THE COMMAND LINE */
+
 	/* populate cmd_line too for later use, preserving boot_command_line */
+	// As we have hijacked it there's no need to overwrite it. However, we copy it back to the original just in case
+	strlcpy(boot_command_line,cmd_line, sizeof(cmd_line));
+	
 	strlcpy(cmd_line, boot_command_line, COMMAND_LINE_SIZE);
 	*cmdline_p = cmd_line;
 

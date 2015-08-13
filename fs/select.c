@@ -69,6 +69,7 @@ static long __estimate_accuracy(struct timespec *tv)
 
 long select_estimate_accuracy(struct timespec *tv)
 {
+	unsigned long ret;
 	struct timespec now;
 
 	/*
@@ -80,8 +81,10 @@ long select_estimate_accuracy(struct timespec *tv)
 
 	ktime_get_ts(&now);
 	now = timespec_sub(*tv, now);
-	return max_t(long, __estimate_accuracy(&now),
-			task_get_effective_timer_slack(current));
+	ret = __estimate_accuracy(&now);
+	if (ret < current->timer_slack_ns)
+		return current->timer_slack_ns;
+	return ret;
 }
 
 
@@ -230,13 +233,10 @@ int poll_schedule_timeout(struct poll_wqueues *pwq, int state,
 			  ktime_t *expires, unsigned long slack)
 {
 	int rc = -EINTR;
-	int timer_mode = HRTIMER_MODE_ABS;
 
 	set_current_state(state);
-	if (!pwq->triggered) {
-		timer_mode = task_get_cgroup_timer_mode(current);
-		rc = schedule_hrtimeout_range(expires, slack, timer_mode);
-	}
+	if (!pwq->triggered)
+		rc = schedule_hrtimeout_range(expires, slack, HRTIMER_MODE_ABS);
 	__set_current_state(TASK_RUNNING);
 
 	/*

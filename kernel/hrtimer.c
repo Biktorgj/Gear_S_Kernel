@@ -85,24 +85,6 @@ DEFINE_PER_CPU(struct hrtimer_cpu_base, hrtimer_bases) =
 			.get_time = &ktime_get_boottime,
 			.resolution = KTIME_LOW_RES,
 		},
-		{
-			.index = HRTIMER_BASE_MONOTONIC + HRTIMER_MAX_STD_BASES,
-			.clockid = CLOCK_MONOTONIC,
-			.get_time = &ktime_get,
-			.resolution = KTIME_LOW_RES,
-		},
-		{
-			.index = HRTIMER_BASE_REALTIME + HRTIMER_MAX_STD_BASES,
-			.clockid = CLOCK_REALTIME,
-			.get_time = &ktime_get_real,
-			.resolution = KTIME_LOW_RES,
-		},
-		{
-			.index = HRTIMER_BASE_BOOTTIME + HRTIMER_MAX_STD_BASES,
-			.clockid = CLOCK_BOOTTIME,
-			.get_time = &ktime_get_boottime,
-			.resolution = KTIME_LOW_RES,
-		},
 	}
 };
 
@@ -200,9 +182,7 @@ hrtimer_check_target(struct hrtimer *timer, struct hrtimer_clock_base *new_base)
 #ifdef CONFIG_HIGH_RES_TIMERS
 	ktime_t expires;
 
-	/* We do not touch hardware for deferrable timers */
-	if (!new_base->cpu_base->hres_active ||
-	    new_base->index >= HRTIMER_MAX_STD_BASES)
+	if (!new_base->cpu_base->hres_active)
 		return 0;
 
 	expires = ktime_sub(hrtimer_get_expires(timer), new_base->offset);
@@ -560,7 +540,7 @@ hrtimer_force_reprogram(struct hrtimer_cpu_base *cpu_base, int skip_equal)
 
 	expires_next.tv64 = KTIME_MAX;
 
-	for (i = 0; i < HRTIMER_MAX_STD_BASES; i++, base++) {
+	for (i = 0; i < HRTIMER_MAX_CLOCK_BASES; i++, base++) {
 		struct hrtimer *timer;
 		struct timerqueue_node *next;
 
@@ -616,13 +596,6 @@ static int hrtimer_reprogram(struct hrtimer *timer,
 	 * callback or at the end of the hrtimer_interrupt.
 	 */
 	if (hrtimer_callback_running(timer))
-		return 0;
-
-	/*
-	 * Deferrable timers are not touching the underlying
-	 * hardware.
-	 */
-	if (base->index >= HRTIMER_MAX_STD_BASES)
 		return 0;
 
 	/*
@@ -917,10 +890,7 @@ static void __remove_hrtimer(struct hrtimer *timer,
 
 			expires = ktime_sub(hrtimer_get_expires(timer),
 					    base->offset);
-
-			/* We only care about non deferrable timers here */
-			if (base->index < HRTIMER_MAX_STD_BASES &&
-			    base->cpu_base->expires_next.tv64 == expires.tv64)
+			if (base->cpu_base->expires_next.tv64 == expires.tv64)
 				hrtimer_force_reprogram(base->cpu_base, 1);
 		}
 #endif
@@ -1146,8 +1116,7 @@ ktime_t hrtimer_get_next_event(void)
 	raw_spin_lock_irqsave(&cpu_base->lock, flags);
 
 	if (!hrtimer_hres_active()) {
-		/* We only care about non deferrable timers here */
-		for (i = 0; i < HRTIMER_MAX_STD_BASES; i++, base++) {
+		for (i = 0; i < HRTIMER_MAX_CLOCK_BASES; i++, base++) {
 			struct hrtimer *timer;
 			struct timerqueue_node *next;
 
@@ -1181,13 +1150,10 @@ static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 
 	cpu_base = &__raw_get_cpu_var(hrtimer_bases);
 
-	if (clock_id == CLOCK_REALTIME && (mode & HRTIMER_MODE_REL))
+	if (clock_id == CLOCK_REALTIME && mode != HRTIMER_MODE_ABS)
 		clock_id = CLOCK_MONOTONIC;
 
 	base = hrtimer_clockid_to_base(clock_id);
-	if (mode & HRTIMER_MODE_DEFERRABLE)
-		base += HRTIMER_MAX_STD_BASES;
-
 	timer->base = &cpu_base->clock_base[base];
 	timerqueue_init(&timer->node);
 
@@ -1288,8 +1254,7 @@ void hrtimer_interrupt(struct clock_event_device *dev)
 {
 	struct hrtimer_cpu_base *cpu_base = &__get_cpu_var(hrtimer_bases);
 	ktime_t expires_next, now, entry_time, delta;
-	unsigned long bases;
-	int retries = 0;
+	int i, retries = 0;
 
 	BUG_ON(!cpu_base->hres_active);
 	cpu_base->nr_events++;
@@ -1308,18 +1273,16 @@ retry:
 	 * this CPU.
 	 */
 	cpu_base->expires_next.tv64 = KTIME_MAX;
-	bases = cpu_base->active_bases;
 
-	while (bases) {
+	for (i = 0; i < HRTIMER_MAX_CLOCK_BASES; i++) {
 		struct hrtimer_clock_base *base;
 		struct timerqueue_node *node;
 		ktime_t basenow;
-		int idx;
 
-		idx = __ffs(bases);
-		bases &= ~(1 << idx);
+		if (!(cpu_base->active_bases & (1 << i)))
+			continue;
 
-		base = cpu_base->clock_base + idx;
+		base = cpu_base->clock_base + i;
 		basenow = ktime_add(now, base->offset);
 
 		while ((node = timerqueue_getnext(&base->active))) {
@@ -1345,14 +1308,8 @@ retry:
 
 				expires = ktime_sub(hrtimer_get_expires(timer),
 						    base->offset);
-				if (expires.tv64 < expires_next.tv64) {
-					/*
-					 * We do not take deferrable timers
-					 * into account here:
-					 */
-					if (idx < HRTIMER_MAX_STD_BASES)
-						expires_next = expires;
-				}
+				if (expires.tv64 < expires_next.tv64)
+					expires_next = expires;
 				break;
 			}
 
@@ -1486,24 +1443,18 @@ void hrtimer_run_pending(void)
  */
 void hrtimer_run_queues(void)
 {
+	struct timerqueue_node *node;
 	struct hrtimer_cpu_base *cpu_base = &__get_cpu_var(hrtimer_bases);
-	unsigned long bases;
-	int gettime = 1;
+	struct hrtimer_clock_base *base;
+	int index, gettime = 1;
 
 	if (hrtimer_hres_active())
 		return;
 
-	bases = cpu_base->active_bases;
-
-	while (bases) {
-		struct hrtimer_clock_base *base;
-		struct timerqueue_node *node;
-		int idx;
-
-		idx = __ffs(bases);
-		bases &= ~(1 << idx);
-
-		base = &cpu_base->clock_base[idx];
+	for (index = 0; index < HRTIMER_MAX_CLOCK_BASES; index++) {
+		base = &cpu_base->clock_base[index];
+		if (!timerqueue_getnext(&base->active))
+			continue;
 
 		if (gettime) {
 			hrtimer_get_softirq_time(cpu_base);
@@ -1588,20 +1539,14 @@ static int update_rmtp(struct hrtimer *timer, struct timespec __user *rmtp)
 	return 1;
 }
 
-#define CLOCKID_DEFERRABLE	0x8000
-
 long __sched hrtimer_nanosleep_restart(struct restart_block *restart)
 {
-	clockid_t clockid = restart->nanosleep.clockid & ~CLOCKID_DEFERRABLE;
-	enum hrtimer_mode mode = HRTIMER_MODE_ABS;
-	struct timespec __user  *rmtp;
 	struct hrtimer_sleeper t;
+	struct timespec __user  *rmtp;
 	int ret = 0;
 
-	if (restart->nanosleep.clockid & CLOCKID_DEFERRABLE)
-		mode |= HRTIMER_MODE_DEFERRABLE;
-
-	hrtimer_init_on_stack(&t.timer, clockid, mode);
+	hrtimer_init_on_stack(&t.timer, restart->nanosleep.clockid,
+				HRTIMER_MODE_ABS);
 	hrtimer_set_expires_tv64(&t.timer, restart->nanosleep.expires);
 
 	if (do_nanosleep(&t, HRTIMER_MODE_ABS))
@@ -1629,7 +1574,7 @@ long hrtimer_nanosleep(struct timespec *rqtp, struct timespec __user *rmtp,
 	int ret = 0;
 	unsigned long slack;
 
-	slack = task_get_effective_timer_slack(current);
+	slack = current->timer_slack_ns;
 	if (rt_task(current))
 		slack = 0;
 
@@ -1639,7 +1584,7 @@ long hrtimer_nanosleep(struct timespec *rqtp, struct timespec __user *rmtp,
 		goto out;
 
 	/* Absolute timers do not update the rmtp value and restart: */
-	if (!(mode & HRTIMER_MODE_REL)) {
+	if (mode == HRTIMER_MODE_ABS) {
 		ret = -ERESTARTNOHAND;
 		goto out;
 	}
@@ -1653,8 +1598,6 @@ long hrtimer_nanosleep(struct timespec *rqtp, struct timespec __user *rmtp,
 	restart = &current_thread_info()->restart_block;
 	restart->fn = hrtimer_nanosleep_restart;
 	restart->nanosleep.clockid = t.timer.base->clockid;
-	if (mode & HRTIMER_MODE_DEFERRABLE)
-		restart->nanosleep.clockid |= CLOCKID_DEFERRABLE;
 	restart->nanosleep.rmtp = rmtp;
 	restart->nanosleep.expires = hrtimer_get_expires_tv64(&t.timer);
 

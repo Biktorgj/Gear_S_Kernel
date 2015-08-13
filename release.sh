@@ -1,47 +1,10 @@
 #!/bin/bash
 #
-JOBS=`grep -c processor /proc/cpuinfo`
-let JOBS=${JOBS}*2
-JOBS="-j${JOBS}"
+JOBS="-j2"
 RELEASE_DATE=`date +%Y%m%d`
-COMMIT_ID=`git log --pretty=format:'%h' -n 1`
-DTS_PREFIX="msm8226-${1}"
+DTS_PREFIX="msm8226-tizen_b3"
 BOOT_PATH="arch/arm/boot"
 DZIMAGE="dzImage"
-
-if [ "${1}" = "" ]; then
-	echo "Warnning: failed to get machine id."
-	echo "ex)./release.sh def_name_prefix locale"
-	echo "ex)./release.sh tizen_w3g"
-	echo "ex)./release.sh tizen_b3"
-	echo "ex)./release.sh tizen_b3 att"
-	echo "ex)./release.sh tizen_b3 tmo"
-	echo "ex)./release.sh tizen_b3 vmc"
-	echo "ex)./release.sh tizen_b3_cdma"
-	echo "ex)./release.sh tizen_b3_cdma spr"
-	echo "ex)./release.sh tizen_b3_cdma vzw"
-	echo "ex)./release.sh tizen_b3_cdma usc"
-	exit
-fi
-
-if [ "${2}" = "" ]; then
-	make ARCH=arm ${1}_defconfig
-elif [ "${1}" = "tizen_b3_cdma" ]; then
-	make ARCH=arm tizen_b3_defconfig VARIANT_DEFCONFIG=${1}_${2}_defconfig
-else
-	make ARCH=arm ${1}_defconfig VARIANT_DEFCONFIG=${1}_${2}_defconfig
-fi
-
-if [ "$?" != "0" ]; then
-       echo "Failed to make defconfig"
-       exit 1
-fi
-
-make $JOBS zImage ARCH=arm
-if [ "$?" != "0" ]; then
-	echo "Failed to make zImage"
-	exit 1
-fi
 
 DTC_PATH="scripts/dtc/"
 DTC_EXEC=$DTC_PATH"dtc"
@@ -69,7 +32,7 @@ if [ "$?" != "0" ]; then
 	exit 1
 fi
 
-mkdzimage -o $BOOT_PATH/$DZIMAGE -k $BOOT_PATH/zImage -d $BOOT_PATH/merged-dtb
+/usr/bin/qemu-arm-static mkdzimage -o $BOOT_PATH/$DZIMAGE -k $BOOT_PATH/zImage -d $BOOT_PATH/merged-dtb
 if [ "$?" != "0" ]; then
 	echo "Failed to make mkdzImage"
 	exit 1
