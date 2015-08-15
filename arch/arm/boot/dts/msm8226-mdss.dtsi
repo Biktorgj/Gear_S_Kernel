@@ -90,7 +90,7 @@
 			cell-index = <0>;
 			compatible = "qcom,mdss-fb";
 			qcom,memory-reservation-type = "EBI1";
-			qcom,memory-reservation-size = <0x0>;
+			qcom,memory-reservation-size = <0x800000>;
 			qcom,memblock-reserve = <0x1A600000 0xC8000>;
 		};
 
