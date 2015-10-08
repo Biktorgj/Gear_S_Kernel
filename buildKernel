@@ -11,6 +11,8 @@ DTC_EXEC=$DTC_PATH"dtc"
 DTS_FILES="$BOOT_PATH/dts/$DTS_PREFIX"
 DTS_LIST=dts_list
 
+make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-
+
 rm $BOOT_PATH/dts/*.dtb -f
 ls $DTS_FILES-*.dts >> $DTS_LIST
 
@@ -26,26 +28,22 @@ done
 
 rm $DTS_LIST -f
 
-dtbtool -o $BOOT_PATH/merged-dtb -p $DTC_PATH -v $BOOT_PATH/dts/
+./buildDeps/dtbtool -o $BOOT_PATH/merged-dtb -p $DTC_PATH -v $BOOT_PATH/dts/
 if [ "$?" != "0" ]; then
 	echo "Failed to make merged-dtb"
 	exit 1
 fi
 
-/usr/bin/qemu-arm-static mkdzimage -o $BOOT_PATH/$DZIMAGE -k $BOOT_PATH/zImage -d $BOOT_PATH/merged-dtb
+qemu-arm ./buildDeps/mkdzimage -o $BOOT_PATH/$DZIMAGE -k $BOOT_PATH/zImage -d $BOOT_PATH/merged-dtb
 if [ "$?" != "0" ]; then
 	echo "Failed to make mkdzImage"
 	exit 1
 fi
 
 sudo ls > /dev/null
-./scripts/mkmodimg.sh
+#./scripts/mkmodimg.sh
 
-if [ "${2}" != "" ]; then
-	RELEASE_IMAGE=System_msm8x26_${1}_${2}_${RELEASE_DATE}-${COMMIT_ID}.tar
-else
-	RELEASE_IMAGE=System_msm8x26_${1}_${RELEASE_DATE}-${COMMIT_ID}.tar
-fi
+RELEASE_IMAGE=GearS_Kernel_${1}_${2}_${RELEASE_DATE}-${COMMIT_ID}.tar
 
 tar cf $RELEASE_IMAGE -C $BOOT_PATH $DZIMAGE
 if [ "$?" != "0" ]; then
@@ -53,9 +51,4 @@ if [ "$?" != "0" ]; then
 	exit 1
 fi
 
-tar rf $RELEASE_IMAGE -C usr/tmp-mod modules.img
-if [ "$?" != "0" ]; then
-	echo "Failed to tar modules.img"
-	exit 1
-fi
 echo $RELEASE_IMAGE

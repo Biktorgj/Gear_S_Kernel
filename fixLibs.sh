@@ -1,0 +1,3 @@
+#!/bin/sh
+echo Copying mkdzimage dependecies to /lib...
+sudo cp buildDeps/libs/* /lib
