@@ -54,8 +54,8 @@ enum {
 DEFINE_LED_TRIGGER(bl_led_trigger);
 static struct mdss_samsung_driver_data msd;
 static void panel_enter_hbm_mode(void);
-//static void panel_alpm_on(unsigned int enable);
-//static int panel_alpm_handler(int event);
+static void panel_alpm_on(unsigned int enable);
+static int panel_alpm_handler(int event);
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
 	return;
@@ -104,18 +104,18 @@ void mdss_dsi_panel_io_enable(int enable)
 	}
 }
 
-void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
+int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo = NULL;
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
-		return;
+		return -ENOMEM;
 	}
 
-	/*if (msd.alpm_mode)
-		return 0;*/
+	if (msd.alpm_mode)
+		return 0;
 
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 			panel_data);
@@ -128,7 +128,7 @@ void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	if (!gpio_is_valid(ctrl_pdata->rst_gpio)) {
 		pr_debug("%s:%d, reset line not configured\n",
 				__func__, __LINE__);
-		return;
+		return -EINVAL;
 	}
 
 	pr_info("%s:enable = %d\n", __func__, enable);
@@ -185,7 +185,7 @@ void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 	}
-	
+	return 0;
 }
 
 static char caset[] = {0x2a, 0x00, 0x00, 0x03, 0x00};	/* DTYPE_DCS_LWRITE */
@@ -395,7 +395,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
 
-	/*if (msd.alpm_mode) {
+	if (msd.alpm_mode) {
 		if (msd.alpm_on)
 			pr_info("%s,panel on skip due to alpm mode\n",
 					__func__);
@@ -407,7 +407,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		}
 		msd.power = FB_BLANK_UNBLANK;
 		return 0;
-	}*/
+	}
 
 	if (ctrl->on_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
@@ -445,18 +445,18 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
-	/*if (msd.alpm_on && msd.alpm_mode) {
+	if (msd.alpm_on && msd.alpm_mode) {
 		msd.power = FB_BLANK_POWERDOWN;
 		pr_info("%s. skip panel off controlled by clock\n", __func__);
 		return 0;
-	}*/
+	}
 
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
 
-	/*if (msd.alpm_on) {
+	if (msd.alpm_on) {
 		pr_info("%s, skip due to alpm mode\n", __func__);
 		goto alpm_event;
-	}*/
+	}
 #if defined(CONFIG_ESD_ERR_FG_RECOVERY)
 	if (msd.esd_status != ESD_DETECTED) {
 		disable_irq(msd.esd_irq);
@@ -465,10 +465,10 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	cancel_delayed_work_sync(&panel_check);
 	gpio_free(msd.esd_det);
 #endif
-	/*if (msd.alpm_mode) {
+	if (msd.alpm_mode) {
 		pr_err("%s: alpm sync broken.\n", __func__);
 		panel_alpm_handler(ALPM_STATE_SYNC);
-	}*/
+	}
 	if (ctrl->off_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
 
@@ -477,11 +477,11 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 
 	return 0;
 
-/*alpm_event:
+alpm_event:
 	panel_alpm_on(msd.alpm_on);
 	enable_irq_wake(msd.esd_irq);
 	enable_irq_wake(msd.err_irq);
-	msd.power = FB_BLANK_POWERDOWN;*/
+	msd.power = FB_BLANK_POWERDOWN;
 	return 0;
 }
 
@@ -985,7 +985,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-bl-min-level", &tmp);
 	pinfo->bl_min = (!rc ? tmp : 0);
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-bl-max-level", &tmp);
-	pinfo->bl_max = 255; // (!rc ? tmp : 255); Remove this from the equation right now,we have better things to worry about.
+	pinfo->bl_max = (!rc ? tmp : 100);
 	ctrl_pdata->bklt_max = pinfo->bl_max;
 
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-interleave-mode", &tmp);
@@ -1167,7 +1167,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	mdss_dsi_parse_dcs_cmds(np, &msd.hbm_elvss_cmd,
 			"qcom,mdss-dsi-hbm-elvss-command",
 			"qcom,mdss-dsi-hbm-elvss-command-state");
-	/*mdss_dsi_parse_dcs_cmds(np, &msd.alpm_on_cmds,
+	mdss_dsi_parse_dcs_cmds(np, &msd.alpm_on_cmds,
 			"qcom,mdss-dsi-alpm-on-commands",
 			"qcom,mdss-dsi-alpm-on-commands-state");
 	mdss_dsi_parse_dcs_cmds(np, &msd.alpm_on_temp_cmds,
@@ -1175,7 +1175,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 			"qcom,mdss-dsi-alpm-on-temp-commands-state");
 	mdss_dsi_parse_dcs_cmds(np, &msd.alpm_off_cmds,
 			"qcom,mdss-dsi-alpm-off-commands",
-			"qcom,mdss-dsi-alpm-off-commands-state");*/
+			"qcom,mdss-dsi-alpm-off-commands-state");
 	mdss_dsi_parse_dcs_cmds(np, &msd.tset_on_cmds,
 			"qcom,mdss-dsi-temp-offset-on-commands",
 			"qcom,mdss-dsi-temp-offset-on-commands-state");
@@ -1362,9 +1362,7 @@ static int mdss_dsi_panel_set_brightness(struct backlight_device *bd)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-	/* Temproary patch for twrp */
-	if (brightness>100)
-			brightness=100;
+
 	if (brightness < pdata->panel_info.bl_min ||
 		brightness > bd->props.max_brightness) {
 		pr_err("brightness should be %d to %d\n",
@@ -1386,25 +1384,25 @@ static int mdss_dsi_panel_set_brightness(struct backlight_device *bd)
 		goto out;
 	}
 
-	/*if (msd.alpm_mode) {
+	if (msd.alpm_mode) {
 		pr_info("brightness control is not supported under alpm mode\n");
 		ret = 0;
 		goto out;
-	}*/
+	}
 
-	/*ret = mdss_dsi_runtime_active(ctrl_pdata, true, __func__);
+	ret = mdss_dsi_runtime_active(ctrl_pdata, true, __func__);
 	if (ret){
 		pr_info("%s:failed to runtime_active:ret[%d]\n", __func__, ret);
 		mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
 		goto out;
-	}*/
+	}
 
 	if (msd.hbm_on)
 		panel_enter_hbm_mode();
 	else
 		panel_update_brightness(bd, level);
 
-	//mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
+	mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
 
 out:
 	return ret;
@@ -1572,11 +1570,11 @@ static ssize_t panel_hbm_store(struct device *dev,
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 							panel_data);
 
-	/*if (mdss_dsi_runtime_active(ctrl_pdata, true, __func__)) {
+	if (mdss_dsi_runtime_active(ctrl_pdata, true, __func__)) {
 		pr_err("hbm control:invalid state.\n");
 		mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
 		return -EPERM;
-	}*/
+	}
 
 	if (msd.hbm_on) {
 		pr_info("HBM ON.\n");
@@ -1586,12 +1584,12 @@ static ssize_t panel_hbm_store(struct device *dev,
 		panel_exit_hbm_mode();
 	}
 
-	//mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
+	mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
 
 	return size;
 }
 
-/*static int panel_alpm_handler(int event)
+static int panel_alpm_handler(int event)
 {
 	struct mdss_panel_data *pdata = msd.mpd;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
@@ -1676,7 +1674,7 @@ out:
 	pr_info("%s:alpm_on[%d]\n", __func__, msd.alpm_on);
 
 	return size;
-}*/
+}
 
 static ssize_t elvss_control_show(struct device *dev, struct
 	device_attribute * attr, char *buf)
@@ -1713,17 +1711,17 @@ static ssize_t elvss_control_store(struct device *dev, struct
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 								panel_data);
 
-	/*if (mdss_dsi_runtime_active(ctrl_pdata, true, __func__)) {
+	if (mdss_dsi_runtime_active(ctrl_pdata, true, __func__)) {
 		pr_err("elvss control:invalid state.\n");
 		mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
 		return -EPERM;
-	}*/
+	}
 
 	dev_info(dev, "elvss temperature stage[%d]\n",
 						msd.temp_stage);
 	panel_temp_offset_control();
 
-	//mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
+	mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
 
 	return size;
 }
@@ -1806,11 +1804,11 @@ static ssize_t panel_mdnie_store(struct device *dev,
 	release_firmware(fw);
 
 out:
-	/*if (mdss_dsi_runtime_active(ctrl_pdata, true, __func__)) {
+	if (mdss_dsi_runtime_active(ctrl_pdata, true, __func__)) {
 		pr_err("invalid state.\n");
 		mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
 		return -EPERM;
-	}*/
+	}
 
 	mdss_dsi_cmds_send(ctrl_pdata, &msd.test_key_on_cmd.cmds[1], 1, 0);
 
@@ -1825,7 +1823,7 @@ out:
 
 	mdss_dsi_cmds_send(ctrl_pdata, &msd.test_key_off_cmd.cmds[1], 1, 0);
 
-	//mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
+	mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
 
 	return size;
 }
@@ -1917,7 +1915,7 @@ DEVICE_ATTR(lcd_type, S_IRUGO, mdss_disp_lcdtype_show, NULL);
 static struct device_attribute lcd_dev_attrs[] = {
 	__ATTR(acl, S_IRUGO | S_IWUSR, panel_acl_show, panel_acl_store),
 	__ATTR(hbm, S_IRUGO | S_IWUSR, panel_hbm_show, panel_hbm_store),
-	//__ATTR(alpm, S_IRUGO | S_IWUSR, panel_alpm_show, panel_alpm_store),
+	__ATTR(alpm, S_IRUGO | S_IWUSR, panel_alpm_show, panel_alpm_store),
 	__ATTR(elvss, S_IRUGO|S_IWUSR|S_IWGRP,
 			elvss_control_show, elvss_control_store),
 #if MDNIE_TUNE
@@ -2006,11 +2004,11 @@ int mdss_dsi_panel_init(struct device_node *node,
 		ctrl_pdata->partial_update_fnc = NULL;
 	}
 
-	/*ctrl_pdata->panel_data.panel_info.ulps_feature_enabled =
+	ctrl_pdata->panel_data.panel_info.ulps_feature_enabled =
 		of_property_read_bool(node, "qcom,ulps-enabled");
 	pr_info("%s: ulps feature %s", __func__,
 		(ctrl_pdata->panel_data.panel_info.ulps_feature_enabled ?
-		"enabled" : "disabled"));*/
+		"enabled" : "disabled"));
 
 	msd.boot_power_on = of_property_read_bool(node,
 				"qcom,was-enable");
@@ -2018,7 +2016,7 @@ int mdss_dsi_panel_init(struct device_node *node,
 	ctrl_pdata->on = mdss_dsi_panel_on;
 	ctrl_pdata->off = mdss_dsi_panel_off;
 	ctrl_pdata->panel_reset = mdss_dsi_panel_reset;
-	//pinfo->alpm_event = panel_alpm_handler;
+	pinfo->alpm_event = panel_alpm_handler;
 
 #if defined(CONFIG_LCD_CLASS_DEVICE)
 	lcd_device = lcd_device_register("s6e36w0x01", &pdev->dev, &msd,

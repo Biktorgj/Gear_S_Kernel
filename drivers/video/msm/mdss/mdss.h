@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -79,6 +79,21 @@ struct mdss_intr {
 	spinlock_t lock;
 };
 
+struct mdss_fudge_factor {
+	u32 numer;
+	u32 denom;
+};
+
+struct mdss_prefill_data {
+	u32 ot_bytes;
+	u32 y_buf_bytes;
+	u32 y_scaler_lines_bilinear;
+	u32 y_scaler_lines_caf;
+	u32 post_scaler_pixels;
+	u32 pp_pixels;
+	u32 fbc_lines;
+};
+
 struct mdss_data_type {
 	u32 mdp_rev;
 	struct clk *mdp_clk[MDSS_MAX_CLK];
@@ -92,6 +107,8 @@ struct mdss_data_type {
 	char __iomem *mdp_base;
 	size_t mdp_reg_size;
 	char __iomem *vbif_base;
+
+	struct mutex reg_lock;
 
 	u32 irq;
 	u32 irq_mask;
@@ -112,8 +129,8 @@ struct mdss_data_type {
 	unsigned long min_mdp_clk;
 
 	u32 res_init;
-	u32 bus_hdl;
 
+	u32 highest_bank_bit;
 	u32 smp_mb_cnt;
 	u32 smp_mb_size;
 	u32 smp_mb_per_pipe;
@@ -122,6 +139,18 @@ struct mdss_data_type {
 
 	u32 max_bw_low;
 	u32 max_bw_high;
+
+	u32 axi_port_cnt;
+	u32 curr_bw_uc_idx;
+	u32 bus_hdl;
+	struct msm_bus_scale_pdata *bus_scale_table;
+
+	struct mdss_fudge_factor ab_factor;
+	struct mdss_fudge_factor ib_factor;
+	struct mdss_fudge_factor clk_factor;
+
+	u32 *clock_levels;
+	u32 nclk_lvl;
 
 	struct mdss_hw_settings *hw_settings;
 
@@ -160,10 +189,15 @@ struct mdss_data_type {
 
 	struct early_suspend early_suspend;
 	struct mdss_debug_inf debug_inf;
-	int current_bus_idx;
 	bool mixer_switched;
 	struct mdss_panel_cfg pan_cfg;
 
+	int handoff_pending;
+	struct mdss_prefill_data prefill_data;
+	bool ulps;
+#ifdef CONFIG_MSM_KGSL_DRM
+	struct notifier_block	nb_ctrl;
+#endif
 };
 extern struct mdss_data_type *mdss_res;
 
@@ -187,18 +221,6 @@ void mdss_enable_irq(struct mdss_hw *hw);
 void mdss_disable_irq(struct mdss_hw *hw);
 void mdss_disable_irq_nosync(struct mdss_hw *hw);
 void mdss_bus_bandwidth_ctrl(int enable);
-void mdss_mdp_dump_power_clk(void);
-
-
-#if defined (CONFIG_FB_MSM_MDSS_DSI_DBG)
-int mdss_mdp_debug_bus(void);
-void xlog(const char *name, u32 data0, u32 data1, u32 data2, u32 data3, u32 data4, u32 data5);
-void xlog_dump(void);
-#endif
-
-#if defined (CONFIG_FB_MSM_MDSS_DBG_SEQ_TICK)
-void mdss_dbg_tick_save(int op_name);
-#endif
 
 static inline struct ion_client *mdss_get_ionclient(void)
 {

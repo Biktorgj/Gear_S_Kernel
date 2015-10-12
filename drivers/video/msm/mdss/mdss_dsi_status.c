@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -86,15 +86,6 @@ static void check_dsi_ctrl_status(struct work_struct *work)
 		mutex_lock(ctl->shared_lock);
 	mutex_lock(&mdp5_data->ov_lock);
 
-	if (pdsi_status->mfd->shutdown_pending) {
-		mutex_unlock(&mdp5_data->ov_lock);
-		if (ctl->shared_lock)
-			mutex_unlock(ctl->shared_lock);
-		pr_err("%s: DSI turning off, avoiding BTA status check\n",
-							__func__);
-		return;
-	}
-
 	/*
 	 * For the command mode panels, we return pan display
 	 * IOCTL on vsync interrupt. So, after vsync interrupt comes
@@ -110,9 +101,9 @@ static void check_dsi_ctrl_status(struct work_struct *work)
 
 	pr_debug("%s: DSI ctrl wait for ping pong done\n", __func__);
 
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false, __func__);
 	ret = ctrl_pdata->check_status(ctrl_pdata);
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false, __func__);
 
 	mutex_unlock(&mdp5_data->ov_lock);
 	if (ctl->shared_lock)
