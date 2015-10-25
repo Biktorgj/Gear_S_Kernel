@@ -22,30 +22,28 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: wl_dbg.h 430628 2013-10-19 04:07:25Z $
+ * $Id: wl_dbg.h 376019 2012-12-21 01:00:06Z $
  */
 
 
 #ifndef _wl_dbg_h_
 #define _wl_dbg_h_
 
-/* wl_msg_level is a bit vector with defs in wlioctl.h */
+
 extern uint32 wl_msg_level;
 extern uint32 wl_msg_level2;
 
 #define WL_TIMESTAMP()
 
-#define WL_PRINT(args)		do { WL_TIMESTAMP(); printf args; } while (0)
-
-#if defined(EVENT_LOG_COMPILE) && defined(WLMSG_SRSCAN)
-#define _WL_SRSCAN(fmt, ...)	EVENT_LOG(EVENT_LOG_TAG_SRSCAN, fmt, ##__VA_ARGS__)
-#define WL_SRSCAN(args)		_WL_SRSCAN args
+#if 0 && (VERSION_MAJOR > 9)
+#include <IOKit/apple80211/IO8Log.h>
+#define WL_PRINT(args)		do { printf args; IO8Log args; } while (0)
 #else
-#define WL_SRSCAN(args)
+#define WL_PRINT(args)		do { WL_TIMESTAMP(); printf args; } while (0)
 #endif
 
 
-/* To disable a message completely ... until you need it again */
+
 #define WL_NONE(args)
 
 #define	WL_ERROR(args)
@@ -59,9 +57,7 @@ extern uint32 wl_msg_level2;
 #define WL_WSEC(args)
 #define WL_WSEC_DUMP(args)
 #endif
-#define WL_PCIE(args)		do {if (wl_msg_level2 & WL_PCIE_VAL) WL_PRINT(args);} while (0)
-#define WL_PCIE_ON()		(wl_msg_level2 & WL_PCIE_VAL)
 
 extern uint32 wl_msg_level;
 extern uint32 wl_msg_level2;
-#endif /* _wl_dbg_h_ */
+#endif 

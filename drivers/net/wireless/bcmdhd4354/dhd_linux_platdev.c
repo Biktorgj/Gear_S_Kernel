@@ -442,7 +442,7 @@ static struct platform_driver dhd_wifi_platform_dev_driver = {
 	}
 };
 
-void dhd_wifi_platform_register_drv(struct work_struct *work)
+int dhd_wifi_platform_register_drv(void)
 {
 	int err = 0;
 	struct device *dev;
@@ -458,6 +458,7 @@ void dhd_wifi_platform_register_drv(struct work_struct *work)
 		dev = bus_find_device(&platform_bus_type, NULL, WIFI_PLAT_EXT, wifi_platdev_match);
 		if (dev == NULL) {
 			DHD_ERROR(("bcmdhd wifi platform data device not found!!\n"));
+			return -ENXIO;
 		}
 		err = platform_driver_register(&dhd_wifi_platform_dev_driver);
 	} else {
@@ -474,6 +475,8 @@ void dhd_wifi_platform_register_drv(struct work_struct *work)
 			}
 		}
 	}
+
+	return err;
 }
 
 #ifdef BCMPCIE

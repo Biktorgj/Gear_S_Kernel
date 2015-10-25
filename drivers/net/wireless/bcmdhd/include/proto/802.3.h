@@ -21,7 +21,7 @@
  *
  * Fundamental constants relating to 802.3
  *
- * $Id: 802.3.h 417943 2013-08-13 07:54:04Z $
+ * $Id: 802.3.h 417942 2013-08-13 07:53:57Z $
  */
 
 #ifndef _802_3_h_

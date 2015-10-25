@@ -56,7 +56,7 @@ typedef struct bcmdhd_wifi_platdata {
 	wifi_adapter_info_t	*adapters;
 } bcmdhd_wifi_platdata_t;
 
-void dhd_wifi_platform_register_drv(struct work_struct *work);
+int dhd_wifi_platform_register_drv(void);
 void dhd_wifi_platform_unregister_drv(void);
 wifi_adapter_info_t* dhd_wifi_platform_get_adapter(uint32 bus_type, uint32 bus_num,
 	uint32 slot_num);

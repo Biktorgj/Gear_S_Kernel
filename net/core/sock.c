@@ -644,7 +644,8 @@ set_rcvbuf:
 
 	case SO_KEEPALIVE:
 #ifdef CONFIG_INET
-		if (sk->sk_protocol == IPPROTO_TCP)
+		if (sk->sk_protocol == IPPROTO_TCP &&
+		    sk->sk_type == SOCK_STREAM)
 			tcp_set_keepalive(sk, valbool);
 #endif
 		sock_valbool_flag(sk, SOCK_KEEPOPEN, valbool);
@@ -1473,11 +1474,6 @@ void sock_rfree(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(sock_rfree);
 
-void sock_edemux(struct sk_buff *skb)
-{
-	sock_put(skb->sk);
-}
-EXPORT_SYMBOL(sock_edemux);
 
 int sock_i_uid(struct sock *sk)
 {

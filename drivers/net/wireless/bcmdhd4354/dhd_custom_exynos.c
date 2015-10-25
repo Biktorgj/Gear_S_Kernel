@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd_custom_exynos.c 459210 2014-03-01 06:23:09Z $
+ * $Id: dhd_custom_exynos.c 459213 2014-03-01 06:26:09Z $
  */
 #include <linux/device.h>
 #include <linux/gpio.h>

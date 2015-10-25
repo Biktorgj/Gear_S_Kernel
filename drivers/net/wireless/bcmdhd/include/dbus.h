@@ -22,7 +22,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dbus.h 423346 2013-09-11 22:38:40Z $
+ * $Id: dbus.h 397286 2013-04-18 01:42:19Z $
  */
 
 #ifndef __DBUS_H__
@@ -143,21 +143,8 @@ typedef struct {
 /*
  * Configurable BUS parameters
  */
-enum {
-	DBUS_CONFIG_ID_RXCTL_DEFERRES = 1,
-	DBUS_CONFIG_ID_TXRXQUEUE
-};
 typedef struct {
-	uint32 config_id;
-	union {
-		bool rxctl_deferrespok;
-		struct {
-			int maxrxq;
-			int rxbufsize;
-			int maxtxq;
-			int txbufsize;
-		} txrxqueue;
-	};
+	bool rxctl_deferrespok;
 } dbus_config_t;
 
 /*
