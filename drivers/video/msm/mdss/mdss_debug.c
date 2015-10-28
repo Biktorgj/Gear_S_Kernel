@@ -502,7 +502,7 @@ int mdss_misr_set(struct mdss_data_type *mdata,
 		pr_err("Invalid MISR Block=%d\n", req->block_id);
 		return -EINVAL;
 	}
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false, __func__);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
 	if (req->block_id == DISPLAY_MISR_MDP) {
 		mixer = mdss_mdp_mixer_get(ctl, MDSS_MDP_MIXER_MUX_DEFAULT);
 		mixer_num = mixer->num;
@@ -555,7 +555,7 @@ int mdss_misr_set(struct mdss_data_type *mdata,
 		pr_debug("MISR_CTRL = 0x%x",
 				readl_relaxed(mdata->mdp_base + map->ctrl_reg));
 	}
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false, __func__);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
 	return 0;
 }
 
@@ -573,7 +573,7 @@ int mdss_misr_get(struct mdss_data_type *mdata,
 		pr_err("Invalid MISR Block=%d\n", resp->block_id);
 		return -EINVAL;
 	}
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false, __func__);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
 	switch (map->crc_op_mode) {
 	case MISR_OP_SFM:
 	case MISR_OP_MFM:
@@ -626,7 +626,7 @@ int mdss_misr_get(struct mdss_data_type *mdata,
 		break;
 	}
 
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false, __func__);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
 	return ret;
 }
 

@@ -61,6 +61,7 @@ static inline u32 mdss_mdp_get_rotator_dst_format(u32 in_format, u8 in_rot90)
 		else
 			return in_format;
 	case MDP_Y_CBCR_H2V2_VENUS:
+	case MDP_Y_CBCR_H2V2:
 		if (in_rot90)
 			return MDP_Y_CRCB_H2V2;
 		else

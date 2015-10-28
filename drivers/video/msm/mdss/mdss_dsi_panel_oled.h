@@ -105,11 +105,7 @@ extern unsigned int system_rev;
 static int lcd_attached = 1;
 static int lcd_id;
 
-int get_lcd_attached(void)
-{
-	return lcd_attached;
-}
-EXPORT_SYMBOL(get_lcd_attached);
+int get_lcd_attached(void);
 
 static int __init lcd_attached_status(char *mode)
 {

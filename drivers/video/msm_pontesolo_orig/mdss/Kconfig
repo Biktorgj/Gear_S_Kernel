@@ -1,0 +1,87 @@
+config FB_MSM_MDSS_WRITEBACK
+	bool "MDSS Writeback Panel"
+	---help---
+	The MDSS Writeback Panel provides support for routing the output of
+	MDSS frame buffer driver and MDP processing to memory.
+
+config FB_MSM_MDSS_HDMI_PANEL
+	depends on FB_MSM_MDSS
+	bool "MDSS HDMI Tx Panel"
+	default n
+	---help---
+	The MDSS HDMI Panel provides support for transmitting TMDS signals of
+	MDSS frame buffer data to connected hdmi compliant TVs, monitors etc.
+
+config FB_MSM_MDSS_HDMI_MHL_SII8334
+	depends on FB_MSM_MDSS_HDMI_PANEL
+	bool 'MHL SII8334 support '
+	default n
+	---help---
+	  Support the HDMI to MHL conversion.
+	  MHL (Mobile High-Definition Link) technology
+	  uses USB connector to output HDMI content
+
+config FB_MSM_MDSS_DSI_CTRL_STATUS
+	tristate "DSI controller status check feature"
+	---help---
+	  Check DSI controller status periodically (default period is 5
+	  seconds) by sending Bus-Turn-Around (BTA) command. If DSI controller
+	  fails to acknowledge the BTA command, it sends PANEL_ALIVE=0 status
+	  to HAL layer to reset the controller.
+
+config FB_MSM_MDSS_FAKE_RES
+	depends on FB_MSM_MDSS
+	bool "Support fake resolution"
+	default n
+	---help---
+	  Support fake resolution, it can be supported various resolution by
+	  sub xres, yres configuration.
+
+config FB_MSM_MDSS_FAKE_XRES
+	depends on FB_MSM_MDSS_FAKE_RES
+	int "Support fake xres"
+	default 1280
+	---help---
+	  Support fake xres information. but it only supports up to
+	  1280 x 1920 resolution for video panel.
+
+config FB_MSM_MDSS_FAKE_YRES
+	depends on FB_MSM_MDSS_FAKE_RES
+	int "Support fake yres"
+	default 1920
+	---help---
+	  Support fake yres information. but it only supports up to
+	  1280 x 1920 resolution for video panel.
+
+config FB_MSM_MDSS_MDP3
+	depends on FB_MSM_MDSS
+	bool "MDP3 display controller"
+	---help---
+	The MDP3 provides support for an older version display controller
+	included in latest display sub-system, known as MDSS.
+
+config FB_MSM_MDSS_SAMSUNG_OLED_PANEL
+	bool "MDSS_SAMSUNG_OLED_PANEL"
+	default n
+	---help---
+	MDSS Samsung OLED Panel support
+
+config FB_MSM_MDSS_SDC_S6E63J0X03_PANEL
+	depends on FB_MSM_MDSS_SAMSUNG_OLED_PANEL
+	bool "MDSS_SAMSUNG_OLED_S6E63J0X03_320P_PANEL"
+	default n
+	---help---
+	MDSS Samsung OLED 320P Panel support
+
+config FB_MSM_MDSS_SDC_S6E36W0X01_PANEL
+	depends on FB_MSM_MDSS_SAMSUNG_OLED_PANEL
+	bool "MDSS_SAMSUNG_OLED_S6E36W0X01_360P_PANEL"
+	default n
+	---help---
+	MDSS Samsung OLED 360P Panel support
+
+config ESD_ERR_FG_RECOVERY
+	bool "MDSS_SAMSUNG_OLED_PANEL_ESD_PROTECTION"
+	default n
+	---help---
+	MDSS Samsung OLED Panel ESD protection support
