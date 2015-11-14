@@ -29,6 +29,10 @@
 #define LDI_HBM_MTP_LEN2		12
 #define LDI_HBM_MTP_LEN3		4
 #define LDI_HBM_MTP_LEN4		1
+enum {
+	MIPI_RESUME_STATE,
+	MIPI_SUSPEND_STATE,
+};
 
 struct mdss_samsung_driver_data {
 	struct dsi_buf sdc_tx_buf;

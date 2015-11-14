@@ -346,11 +346,7 @@ void mdss_dsi_host_init(struct mipi_panel_info *pinfo,
 	if (ctrl_pdata->shared_pdata.broadcast_enable)
 		MIPI_OUTP(ctrl_pdata->ctrl_base + 0x3C, 0x90000000);
 	else
-#if defined(CONFIG_FB_MSM_MDSS_TC_DSI2LVDS_WXGA_PANEL)
-		MIPI_OUTP(ctrl_pdata->ctrl_base + 0x3C, 0x14000000);
-#else
-		MIPI_OUTP(ctrl_pdata->ctrl_base + 0x3C, 0x10000000);
-#endif
+		MIPI_OUTP(ctrl_pdata->ctrl_base + 0x3C, 0x10000000); // 0x14000000 in tizen
 	if (ctrl_pdata->shared_pdata.broadcast_enable)
 		if (pdata->panel_info.pdest == DISPLAY_1) {
 			pr_debug("%s: Broadcast mode enabled.\n",
@@ -598,6 +594,9 @@ void mdss_dsi_op_mode_config(int mode,
 			MIPI_OUTP(left_ctrl_pdata->ctrl_base + 0x0004,
 					dsi_ctrl);
 		}
+
+
+
 
 	MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x0110,
 				intr_ctrl); /* DSI_INTL_CTRL */
@@ -1202,7 +1201,7 @@ static int mdss_dsi_cmd_dma_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 
 	pr_info("%s: ", __func__);
 	for (i = 0; i < tp->len; i++)
-		printk("%x ", *bp++);
+		pr_debug("%x ", *bp++);
 
 	pr_info("\n");
 #endif
@@ -1211,7 +1210,9 @@ static int mdss_dsi_cmd_dma_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 	len = ALIGN(tp->len, 4);
 	size = ALIGN(tp->len, SZ_4K);
 
+
 #if !defined(CONFIG_MACH_S3VE3G_EUR)
+
 	tp->dmap = dma_map_single(&dsi_dev, tp->data, size, DMA_TO_DEVICE);
 	if (dma_mapping_error(&dsi_dev, tp->dmap)) {
 		pr_err("%s: dmap mapp failed\n", __func__);
@@ -1256,14 +1257,6 @@ static int mdss_dsi_cmd_dma_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 	ret = wait_for_completion_timeout(&ctrl->dma_comp,
 				msecs_to_jiffies(DMA_TX_TIMEOUT));
 	if (ret == 0) {
-#if defined (CONFIG_FB_MSM_MDSS_DSI_DBG)
-		dumpreg();
-		mdp5_dump_regs();
-		mdss_dsi_dump_power_clk(&ctrl->panel_data, 0);
-		mdss_mdp_dump_power_clk();
-		mdss_mdp_debug_bus();
-		xlog_dump();
-#endif
 		pr_err("dma tx timeout!!\n");
 		ret = -ETIMEDOUT;
 	} else
@@ -1312,7 +1305,7 @@ void mdss_dsi_wait4video_done(struct mdss_dsi_ctrl_pdata *ctrl)
 	u32 data;
 
 	if (!ctrl->mdp_tg_on) {
-		pr_info("%s : ctrl->mdp_tg_on is zero..\n",__func__);
+		pr_debug("%s : ctrl->mdp_tg_on is zero..\n",__func__);
 		return;
 	}
 
@@ -1415,21 +1408,6 @@ void mdss_dsi_cmd_mdp_busy(struct mdss_dsi_ctrl_pdata *ctrl)
 			pr_info("%s: wait_for_completion_timeout (count : %d)",
 										 __func__, ++busy_timeout_cnt);
 			/*WARN(1, "mdss_dsi_cmd_mdp_busy timeout");*/
-
-#if defined (CONFIG_FB_MSM_MIPI_SAMSUNG_OCTA_CMD_WQHD_PT_PANEL)
-			dumpreg();
-			mdp5_dump_regs();
-			mdss_dsi_dump_power_clk(&ctrl->panel_data, 0);
-			mdss_mdp_dump_power_clk();
-			mdss_mdp_debug_bus();
-			xlog_dump();
-#if 0
-			pr_info("run recovery function instead of force panic\n");
-			dsi_send_events(ctrl, DSI_EV_MDP_BUSY_RELEASE);
-#else
-			panic("mdss_dsi_cmd_mdp_busy timeout");
-#endif
-#endif
         }
 
 	}
@@ -1494,7 +1472,6 @@ int mdss_dsi_cmdlist_commit(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp)
 	mdss_mdp_clk_ctrl(1, false);
 #endif
 #endif
-
 	mutex_lock(&ctrl->cmd_mutex);
 	req = mdss_dsi_cmdlist_get(ctrl);
 
@@ -1545,7 +1522,6 @@ need_lock:
 #endif
 
 	mutex_unlock(&ctrl->cmd_mutex);
-
 #if defined(CONFIG_FB_MSM_MIPI_SAMSUNG_OCTA_CMD_FULL_HD_PT_PANEL) || defined(CONFIG_FB_MSM_MIPI_SAMSUNG_OCTA_CMD_WQHD_PT_PANEL)\
 	|| defined(CONFIG_FB_MSM_MIPI_SAMSUNG_YOUM_CMD_FULL_HD_PT_PANEL)
 #ifndef CONFIG_LCD_FORCE_VIDEO_MODE
@@ -1679,19 +1655,7 @@ void mdss_dsi_fifo_status(struct mdss_dsi_ctrl_pdata *ctrl)
 		pr_err("%s: status=%x\n", __func__, status);
 		if (status & 0x0080)  /* CMD_DMA_FIFO_UNDERFLOW */
 			dsi_send_events(ctrl, DSI_EV_MDP_FIFO_UNDERFLOW);
-		
-#if defined (CONFIG_FB_MSM_MIPI_SAMSUNG_OCTA_CMD_WQHD_PT_PANEL)
-		if (status == 0x99991080) {
-			dumpreg();
-			mdp5_dump_regs();
-			mdss_dsi_dump_power_clk(&ctrl->panel_data, 0);
-			mdss_mdp_dump_power_clk();
-			mdss_mdp_debug_bus();
-			xlog_dump();
-				panic("mdss_dsi_fifo err");
 		}
-#endif
-	}
 }
 
 void mdss_dsi_status(struct mdss_dsi_ctrl_pdata *ctrl)

@@ -32,10 +32,13 @@
 #include <linux/smart_dimming_s6e36w0x01.h>
 #endif
 #define DT_CMD_HDR 6
+u8 panel_previous_alpm_mode;
+u8 panel_actual_alpm_mode;
 #if defined(CONFIG_ESD_ERR_FG_RECOVERY)
 struct delayed_work panel_check;
 static struct class *esd_class;
 static struct device *esd_dev;
+
 enum esd_status {
 	ESD_NONE,
 	ESD_DETECTED,
@@ -55,7 +58,7 @@ DEFINE_LED_TRIGGER(bl_led_trigger);
 static struct mdss_samsung_driver_data msd;
 static void panel_enter_hbm_mode(void);
 static void panel_alpm_on(unsigned int enable);
-static int panel_alpm_handler(int event);
+u8 panel_alpm_handler(u8 flag);
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
 	return;
@@ -96,14 +99,15 @@ void mdss_dsi_panel_io_enable(int enable)
 		return;
 
 	if (enable) {
+		pr_debug ("oled: %s: Enable GPIO", __func__);
 		gpio_request(msd.lcd_io_en, "lcd_io_enable");
 		gpio_set_value(msd.lcd_io_en, enable);
 	} else {
+		pr_debug ("oled: %s: Disable GPIO", __func__);
 		gpio_set_value(msd.lcd_io_en, enable);
 		gpio_free(msd.lcd_io_en);
 	}
 }
-
 void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
@@ -113,39 +117,44 @@ void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 			panel_data);
 	pinfo = &(ctrl_pdata->panel_data.panel_info);
-	printk ("oled: Panel Reset called\n");
+	pr_debug ("oled: Panel Reset called\n");
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return;
 	}
    
-	if (pinfo->alpm_event(CHECK_CURRENT_STATUS)){
-		printk("oled: Cannot reset panel, ALPM enabled!\n");
-		return;
+	if (pinfo->alpm_event) {
+		if (enable && pinfo->alpm_event(CHECK_PREVIOUS_STATUS))
+			return;
+		else if (!enable && pinfo->alpm_event(CHECK_CURRENT_STATUS)) {
+			pinfo->alpm_event(STORE_CURRENT_STATUS);
+			return;
+		}
+	pr_debug("oled: [ALPM_DEBUG] %s: Panel reset, enable : %d\n",
+			__func__, enable);
 	}
-	
 	if (!gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
-		pr_info("%s:%d, reset line not configured\n",
+		pr_info("%s:%d, disp_en line not configured\n",
 				__func__, __LINE__);
 	}
 
 	if (!gpio_is_valid(ctrl_pdata->rst_gpio)) {
-		printk("%s:%d, reset line not configured\n",
+		pr_debug("%s:%d, reset line not configured\n",
 				__func__, __LINE__);
 		return;
 	}
-	printk ("oled: Panel Reset: Enable is set to %d\n");
+	pr_debug ("oled: Panel Reset: Enable is set to %d\n", enable);
 	
 	if (enable) {
-		printk("oled: panel reset: enabling display\n");
+		pr_debug("oled: panel reset: enabling display\n");
 		msleep(20);
 		if (gpio_is_valid(msd.mipi_sel_gpio)){
-			printk("oled: panel reset - enable  mipi_sel_gpio\n");
+			pr_debug("oled: panel reset - enable  mipi_sel_gpio\n");
 			gpio_set_value(msd.mipi_sel_gpio, 1);
 		}
 		usleep_range(1000, 1000);
 		if (gpio_is_valid(ctrl_pdata->rst_gpio)) {
-			printk("oled: panel reset - enable rst_gpio \n");
+			pr_debug("oled: panel reset - enable rst_gpio \n");
 			gpio_request(ctrl_pdata->rst_gpio, "disp_rst_n");
 			gpio_set_value((ctrl_pdata->rst_gpio), 1);
 			msleep(20);
@@ -155,11 +164,11 @@ void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			msleep(20);
 		}
 		if (gpio_is_valid(msd.en_on_gpio)){
-			printk("oled: panel reset - enable en_on_gpio\n");
+			pr_debug("oled: panel reset - enable en_on_gpio\n");
 			gpio_set_value(msd.en_on_gpio, 1);
 		}
 		if (gpio_is_valid(msd.disp_sel_en)) {
-			printk("oled: panel reset - enable disp_sel_gpio\n");
+			pr_debug("oled: panel reset - enable disp_sel_gpio\n");
 			rc = gpio_tlmm_config(GPIO_CFG(msd.disp_sel_en, 0,
 				GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_8MA),
 				GPIO_CFG_ENABLE);
@@ -169,7 +178,7 @@ void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 		}
 
 		if (gpio_is_valid(ctrl_pdata->mode_gpio)) {
-			printk("oled: panel reset - enable - mode_gpio \n");
+			pr_debug("oled: panel reset - enable - mode_gpio \n");
 			if (pinfo->mode_gpio_state == MODE_GPIO_HIGH)
 				gpio_set_value((ctrl_pdata->mode_gpio), 1);
 			else if (pinfo->mode_gpio_state == MODE_GPIO_LOW)
@@ -179,22 +188,22 @@ void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
 		if (ctrl_pdata->ctrl_state & CTRL_STATE_PANEL_INIT) {
-			printk("%s: Panel Not properly turned OFF\n",
+			pr_debug("%s: Panel Not properly turned OFF\n",
 					__func__);
 			ctrl_pdata->ctrl_state &= ~CTRL_STATE_PANEL_INIT;
-			printk("%s: Reset panel done\n", __func__);
+			pr_debug("%s: Reset panel done\n", __func__);
 		}
 	} else {
-		printk("oled: Panel reset: panel disable\n");
+		pr_debug("oled: Panel reset: panel disable\n");
 		if (gpio_is_valid(ctrl_pdata->rst_gpio)) {
-			printk("oled: panel reset - disable - rst_gpio \n");
+			pr_debug("oled: panel reset - disable - rst_gpio \n");
 			gpio_set_value((ctrl_pdata->rst_gpio), 0);
 			gpio_free(ctrl_pdata->rst_gpio);
 		}
 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 	}
-	
+	pr_debug ("oled: Panel reset finished (Enable=%d\n )", enable);
 }
 
 static char caset[] = {0x2a, 0x00, 0x00, 0x03, 0x00};	/* DTYPE_DCS_LWRITE */
@@ -221,7 +230,7 @@ static int mdss_dsi_panel_partial_update(struct mdss_panel_data *pdata)
 				panel_data);
 	mipi  = &pdata->panel_info.mipi;
 
-	printk("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
+	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
 
 	caset[1] = (((pdata->panel_info.roi_x) & 0xFF00) >> 8);
 	caset[2] = (((pdata->panel_info.roi_x) & 0xFF));
@@ -239,7 +248,7 @@ static int mdss_dsi_panel_partial_update(struct mdss_panel_data *pdata)
 								& 0xFF));
 	partial_update_enable_cmd[1].payload = paset;
 
-	printk("%s: enabling partial update\n", __func__);
+	pr_debug("%s: enabling partial update\n", __func__);
 	memset(&cmdreq, 0, sizeof(cmdreq));
 	cmdreq.cmds = partial_update_enable_cmd;
 	cmdreq.cmds_cnt = 2;
@@ -298,10 +307,10 @@ static void panel_get_gamma_table(struct mdss_samsung_driver_data *msdd,
 		msd.gamma_tbl[i][0] = LDI_MTP_SET;
 		panel_get_gamma(msdd->dimming, i,
 					&msdd->gamma_tbl[i][1]);
-		printk("[G_tbl][%d]", candela_tbl[i]);
+		pr_debug("[G_tbl][%d]", candela_tbl[i]);
 		for (j = 1; j < GAMMA_CNT + 1; j++)
-			printk("%d, " , msd.gamma_tbl[i][j]);
-		printk("\n");
+			pr_debug("%d, " , msd.gamma_tbl[i][j]);
+		pr_debug("\n");
 	}
 
 	memcpy(msd.gamma_tbl[MAX_GAMMA_CNT - 1],
@@ -394,8 +403,9 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
 	struct mdss_panel_info *pinfo = NULL;
 
+
 	msd.mfd = (struct msm_fb_data_type *)registered_fb[0]->par;
-	printk ("oled: Display panel power up started!\n");
+	pr_debug ("oled: Display panel power up started!\n");
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
@@ -407,28 +417,50 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 
 	/* ALPM rework */
 	// If alpm was off and has been enabled...
-	if (!pinfo->alpm_event(CHECK_PREVIOUS_STATUS) && pinfo->alpm_event(CHECK_CURRENT_STATUS)){
-		printk ("oled: Panel in ALPM mode!\n");
-		msd.power = FB_BLANK_UNBLANK;
-		return 0;
-		}
-	// If it was on and has been disabled...
-	else if(pinfo->alpm_event(CHECK_PREVIOUS_STATUS) && !pinfo->alpm_event(CHECK_CURRENT_STATUS)){
-		printk ("oled: Panel in Normal mode, previously in ALP\n");
-		panel_alpm_on(0);
-		disable_irq_wake(msd.esd_irq);
-		disable_irq_wake(msd.err_irq);
-		msd.power = FB_BLANK_UNBLANK;
-		return 0;
-		}
-	// Other cases didn't match, proceed to tun on!
-		
-	if (ctrl->on_cmds.cmd_cnt){
-		printk ("oled: send powerup commands\n");
+	
+	if (pinfo->alpm_event){
+		if (!pinfo->alpm_event(CHECK_PREVIOUS_STATUS)){
+			pr_debug ("oled: Panel wasn't in ALPM mode!\n");
+			mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
+			}
+		else{
+			pr_debug("oled: check_previous_status was 1\n");
+			}
+	}
+	else{
+		pr_debug ("oled: No alpm event, turn it on anyway\n");
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
+	}
+
+	msd.mfd->resume_state = MIPI_RESUME_STATE;
+	
+/* ALPM Mode Change */
+	if (pinfo->alpm_event) {
+		if (!pinfo->alpm_event(CHECK_PREVIOUS_STATUS)\
+				&& pinfo->alpm_event(CHECK_CURRENT_STATUS)) {
+			/* Turn On ALPM Mode */
+			panel_alpm_on(1);
+			pinfo->alpm_event(STORE_CURRENT_STATUS);
+			pr_info("[ALPM_DEBUG] %s: Send ALPM mode on cmds\n", __func__);
+		} else if (!pinfo->alpm_event(CHECK_CURRENT_STATUS)\
+					&& pinfo->alpm_event(CHECK_PREVIOUS_STATUS)) {
+			/* Turn Off ALPM Mode */
+			panel_alpm_on(0);
+			//disable_irq_wake(msd.esd_irq);
+			//disable_irq_wake(msd.err_irq);
+			pinfo->alpm_event(CLEAR_MODE_STATUS);
+			pr_info("[ALPM_DEBUG] %s: Send ALPM off cmds\n", __func__);
 		}
+	}
+
+	pr_debug ("oled: Panel powerup mode: normal\n");
+	/*if (ctrl->on_cmds.cmd_cnt){
+		pr_debug ("oled: send powerup commands\n");
+		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
+		}*/
+	
 	if (msd.boot_power_on) {
-		printk("oled: Boot power up!\n");
+		pr_debug("oled: Boot power up!\n");
 		mdss_dsi_panel_read_mtp(pdata);
 		msd.boot_power_on = 0;
 #if defined(CONFIG_ESD_ERR_FG_RECOVERY)
@@ -443,7 +475,9 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	enable_irq(msd.esd_irq);
 	schedule_delayed_work(&panel_check, msecs_to_jiffies(500));
 #endif
-	msd.power = FB_BLANK_UNBLANK;
+	//msd.power = FB_BLANK_UNBLANK;
+
+
 	pr_info("%s Panel power up completed.\n", __func__);
 
 	return 0;
@@ -453,60 +487,41 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
 	struct mdss_panel_info *pinfo = NULL;
+
 	msd.mfd = (struct msm_fb_data_type *)registered_fb[0]->par;
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-	printk ("oled: Panel Power off was called\n");
+	pr_debug ("oled: Panel Power off was called\n");
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 	pinfo = &(ctrl->panel_data.panel_info);
 
-	/* ALPM rework */
-	if (pinfo->alpm_event(CHECK_CURRENT_STATUS)){
-		printk("oled: ALPM enabled, jump to enable IRQ\n");
-		goto alpm_event;
-	}
-	
-	// When should this case kick in?
-	/*if (msd.alpm_on && msd.alpm_mode) {
-		msd.power = FB_BLANK_POWERDOWN;
-		pr_info("%s. skip panel off controlled by clock\n", __func__);
-		return 0;
-	}*/
+	msd.mfd->resume_state = MIPI_SUSPEND_STATE;
 
-	/*if (msd.alpm_on) {
-		pr_info("%s, skip due to alpm mode\n", __func__);
-		goto alpm_event;
-	}*/
-#if defined(CONFIG_ESD_ERR_FG_RECOVERY)
+	#if defined(CONFIG_ESD_ERR_FG_RECOVERY)
 	if (msd.esd_status != ESD_DETECTED) {
-		printk ("oled: ESD recovery required!\n");
+		pr_debug ("oled: ESD recovery required!\n");
 		disable_irq(msd.esd_irq);
 		disable_irq(msd.err_irq);
 	}
 	cancel_delayed_work_sync(&panel_check);
 	gpio_free(msd.esd_det);
-#endif
-	/*if (msd.alpm_mode) {
-		pr_err("%s: alpm sync broken.\n", __func__);
-		panel_alpm_handler(ALPM_STATE_SYNC);
-	}*/
-	if (ctrl->off_cmds.cmd_cnt){
-	printk ("oled: Panel off CMDs send\n");
-	mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
+	#endif
+	
+	pr_info("oled: DISPLAY_OFF\n");
+	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_CURRENT_STATUS)){
+		pr_info("oled: [ALPM_DEBUG] %s: Skip to send panel off cmds\n", __func__);
+		//enable_irq_wake(msd.esd_irq);
+		//enable_irq_wake(msd.err_irq);
+	}else{
+		pr_debug("oled: Sending display off commands\n");
+		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
 	}
-	msd.power = FB_BLANK_POWERDOWN;
+	//msd.power = FB_BLANK_POWERDOWN;
+
 	pr_info("oled: %s Panel power off finished.\n", __func__);
-
-	return 0;
-
-alpm_event:
-	panel_alpm_on(1); // turn it on!
-	enable_irq_wake(msd.esd_irq);
-	enable_irq_wake(msd.err_irq);
-	msd.power = FB_BLANK_POWERDOWN;
 	return 0;
 }
 
@@ -518,11 +533,11 @@ static int mdss_dsi_panel_parse_dcs_string_cmds(struct device_node *of_node,
 	const char *out_text, *out_prop, *out_payload;
 	int ret = 0, i, count, total = 0;
 
-	printk("cmd_key[%s]link_state[%s]\n",
+	pr_debug("cmd_key[%s]link_state[%s]\n",
 		cmd_key, link_key);
 
 	count = of_property_count_strings(of_node, cmd_key);
-	printk("count[%d]\n", count);
+	pr_debug("count[%d]\n", count);
 
 	if (count < 0) {
 		pr_err("failed to get cmd_key[%s]\n", cmd_key);
@@ -562,7 +577,7 @@ static int mdss_dsi_panel_parse_dcs_string_cmds(struct device_node *of_node,
 		pcmds->cmds[i].payload = (char *)out_payload +
 					sizeof(struct dsi_ctrl_hdr);
 
-		printk("%d:out_prop[%s]dtype[0x%x]dlen[%x]wait[%d]\n",
+		pr_debug("%d:out_prop[%s]dtype[0x%x]dlen[%x]wait[%d]\n",
 			i, out_prop, dchdr->dtype, dchdr->dlen, dchdr->wait);
 
 		total += dchdr->dlen + sizeof(struct dsi_ctrl_hdr);
@@ -575,7 +590,7 @@ static int mdss_dsi_panel_parse_dcs_string_cmds(struct device_node *of_node,
 	if (!strncmp(out_text, "dsi_hs_mode", 11))
 		pcmds->link_state = DSI_HS_MODE;
 
-	printk("len[%d]cmd_cnt[%d]link_state[%d]\n",
+	pr_debug("len[%d]cmd_cnt[%d]link_state[%d]\n",
 		pcmds->blen, pcmds->cmd_cnt, pcmds->link_state);
 
 	return ret;
@@ -657,7 +672,7 @@ static int mdss_dsi_parse_dcs_cmds(struct device_node *np,
 		pcmds->link_state = DSI_HS_MODE;
 	else
 		pcmds->link_state = DSI_LP_MODE;
-	printk("%s: dcs_cmd=%x len=%d, cmd_cnt=%d link_state=%d\n", __func__,
+	pr_debug("%s: dcs_cmd=%x len=%d, cmd_cnt=%d link_state=%d\n", __func__,
 		pcmds->buf[0], pcmds->blen, pcmds->cmd_cnt, pcmds->link_state);
 
 	return 0;
@@ -825,7 +840,7 @@ static int mdss_dsi_parse_fbc_params(struct device_node *np,
 
 	fbc_enabled = of_property_read_bool(np,	"qcom,mdss-dsi-fbc-enable");
 	if (fbc_enabled) {
-		printk("%s:%d FBC panel enabled.\n", __func__, __LINE__);
+		pr_debug("%s:%d FBC panel enabled.\n", __func__, __LINE__);
 		panel_info->fbc.enabled = 1;
 		rc = of_property_read_u32(np, "qcom,mdss-dsi-fbc-bpp", &tmp);
 		panel_info->fbc.target_bpp =	(!rc ? tmp : panel_info->bpp);
@@ -864,7 +879,7 @@ static int mdss_dsi_parse_fbc_params(struct device_node *np,
 				"qcom,mdss-dsi-fbc-lossy-mode-idx", &tmp);
 		panel_info->fbc.lossy_mode_idx = (!rc ? tmp : 0);
 	} else {
-		printk("%s:%d Panel does not support FBC.\n",
+		pr_debug("%s:%d Panel does not support FBC.\n",
 				__func__, __LINE__);
 		panel_info->fbc.enabled = 0;
 		panel_info->fbc.target_bpp =
@@ -930,7 +945,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 			pinfo->mipi.mode, tmp,
 			&(pinfo->mipi.dst_format));
 	if (rc) {
-		printk("%s: problem determining dst format. Set Default\n",
+		pr_debug("%s: problem determining dst format. Set Default\n",
 				__func__);
 		pinfo->mipi.dst_format =
 			DSI_VIDEO_DST_FORMAT_RGB888;
@@ -947,7 +962,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	else if (!strncmp(pdest, "display_2", 9))
 		pinfo->pdest = DISPLAY_2;
 	else {
-		printk("%s: pdest not specified. Set Default\n",
+		pr_debug("%s: pdest not specified. Set Default\n",
 				__func__);
 		pinfo->pdest = DISPLAY_1;
 	}
@@ -979,7 +994,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 		if (!strncmp(data, "bl_ctrl_wled", 12)) {
 			led_trigger_register_simple("bkl-trigger",
 					&bl_led_trigger);
-			printk("%s: SUCCESS-> WLED TRIGGER register\n",
+			pr_debug("%s: SUCCESS-> WLED TRIGGER register\n",
 					__func__);
 			ctrl_pdata->bklt_ctrl = BL_WLED;
 		} else if (!strncmp(data, "bl_ctrl_pwm", 11)) {
@@ -1243,7 +1258,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	} else if (!strncmp(on_cmds_state, "dsi_hs_mode", 11)) {
 		ctrl_pdata->dsi_on_state = DSI_HS_MODE;
 	} else {
-		printk("%s: ON cmds state not specified. Set Default\n",
+		pr_debug("%s: ON cmds state not specified. Set Default\n",
 				__func__);
 		ctrl_pdata->dsi_on_state = DSI_LP_MODE;
 	}
@@ -1255,7 +1270,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	} else if (!strncmp(off_cmds_state, "dsi_hs_mode", 11)) {
 		ctrl_pdata->dsi_off_state = DSI_HS_MODE;
 	} else {
-		printk("%s: ON cmds state not specified. Set Default\n",
+		pr_debug("%s: ON cmds state not specified. Set Default\n",
 				__func__);
 		ctrl_pdata->dsi_off_state = DSI_LP_MODE;
 	}
@@ -1269,7 +1284,7 @@ error:
 static int mdss_dsi_panel_get_power(struct lcd_device *ld)
 {
 	struct mdss_samsung_driver_data *msdd = lcd_get_data(ld);
-	printk("%s[%d][%s]\n", __func__,
+	pr_debug("%s[%d][%s]\n", __func__,
 		msdd->power, current->comm);
 
 	return msdd->power;
@@ -1277,10 +1292,11 @@ static int mdss_dsi_panel_get_power(struct lcd_device *ld)
 
 static int mdss_dsi_panel_set_power(struct lcd_device *ld, int power)
 {
+
 	struct mdss_samsung_driver_data *msdd = lcd_get_data(ld);
 	int ret = 0;
 
-	printk("power[%d]\n", power);
+	pr_debug("power[%d]\n", power);
 	if (power != FB_BLANK_UNBLANK &&
 	    power != FB_BLANK_POWERDOWN) {
 		dev_err(&ld->dev, "power value should be 0 or 4\n");
@@ -1298,16 +1314,24 @@ static int mdss_dsi_panel_set_power(struct lcd_device *ld, int power)
 	switch (power) {
 	case FB_BLANK_UNBLANK:
 	case FB_BLANK_NORMAL:
+
+
+
 		/* TODO : unblank control */
 		break;
+
+
+
+
 	default:
+
 		break;
 	}
 
 	msdd->power = power;
 
 out:
-	printk("%s[%d][%s]\n", __func__,
+	pr_debug("%s[%d][%s]\n", __func__,
 		power, current->comm);
 	return ret;
 }
@@ -1411,7 +1435,7 @@ static int mdss_dsi_panel_set_brightness(struct backlight_device *bd)
 
 	/* ALPM rework */
 	if (pinfo->alpm_event(CHECK_CURRENT_STATUS)){
-		printk ("oled: ALPM enabled, skip brightness setting\n");
+		pr_debug ("oled: ALPM enabled, skip brightness setting\n");
 		ret = 0;
 		goto out;
 	}
@@ -1620,18 +1644,50 @@ static ssize_t panel_hbm_store(struct device *dev,
 	return size;
 }
 
-static int panel_alpm_handler(int event)
+u8 panel_alpm_handler(u8 flag)
 {
-	struct mdss_panel_data *pdata = msd.mpd;
-	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+//	static u8 brightness = 60; /* Default brightness level is 60cd */
+	u8 ret = 0;
 
-	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
-							panel_data);
+	switch (flag) {
+		case ALPM_MODE_ON:
+			panel_actual_alpm_mode = ALPM_MODE_ON;
+			pr_debug ("oled: %s : ALPM MODE ON\n",__func__);
+			break;
+		case NORMAL_MODE_ON:
+			panel_actual_alpm_mode = MODE_OFF;
+			pr_debug ("oled: %s : NORMAL MODE ON\n",__func__);
+			break;
+		case MODE_OFF:
+			panel_actual_alpm_mode = MODE_OFF;
+			pr_debug ("oled: %s : MODE OFF\n",__func__);
+			break;
+		case CHECK_CURRENT_STATUS:
+			ret = panel_actual_alpm_mode;
+			pr_debug ("oled: %s : CHECK CURRENT STATUS: %i\n",__func__, panel_actual_alpm_mode);
+			break;
+		case CHECK_PREVIOUS_STATUS:
+			ret = panel_previous_alpm_mode;
+			pr_debug ("oled: %s : CHK PREVIOUS STATUS %i\n",__func__, panel_previous_alpm_mode);
+			break;
+		case STORE_CURRENT_STATUS:
+			panel_previous_alpm_mode = panel_actual_alpm_mode;
+			pr_debug ("oled: %s : STORE CURRENT STATUS: %i\n",__func__, panel_actual_alpm_mode);
+			break;
+		case CLEAR_MODE_STATUS:
+			panel_previous_alpm_mode = 0;
+			panel_actual_alpm_mode = 0;
+			pr_debug ("oled: %s : CLEAR CURRENT STATUS\n",__func__);
+			break;
+		default:
+			pr_debug ("oled: Panel Handler - default case\n");
+			break;
+	}
 
-	printk("%s: event=%d\n", __func__, event);
+	pr_debug("[ALPM_DEBUG] panel_actual_alpm_mode : %d, panel_previous_alpm_mode : %d, ret : %d\n",\
+				 panel_actual_alpm_mode, panel_previous_alpm_mode, ret);
 
-
-	return 0;
+	return ret;
 }
 
 static void panel_alpm_on(unsigned int enable)
@@ -1658,6 +1714,7 @@ static void panel_alpm_on(unsigned int enable)
 		// Turn it on and fuck it.
 		mdss_dsi_panel_cmds_send(ctrl_pdata, &msd.alpm_on_cmds);
 		pr_info("%s: ALPM ON.\n", __func__);
+		panel_actual_alpm_mode=ALPM_MODE_ON;
 		pinfo->alpm_event(STORE_CURRENT_STATUS);
 	} else {
 		// Turn it off and stfu.
@@ -1675,7 +1732,7 @@ static ssize_t panel_alpm_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	int rc;
-	int current_status = 0;
+	int panel_actual_alpm_mode = 0;
 	struct mdss_panel_data *pdata = msd.mpd;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo = NULL;
@@ -1684,11 +1741,11 @@ static ssize_t panel_alpm_show(struct device *dev,
 	pinfo = &(ctrl_pdata->panel_data.panel_info);
 
 	if (pinfo && pinfo->alpm_event)
-		current_status = (int)pinfo->alpm_event(CHECK_CURRENT_STATUS);
+		panel_actual_alpm_mode = (int)pinfo->alpm_event(CHECK_CURRENT_STATUS);
 
-	rc = snprintf((char *)buf, sizeof(buf), "%d\n", current_status);
+	rc = snprintf((char *)buf, sizeof(buf), "%d\n", panel_actual_alpm_mode);
 	pr_info("[ALPM_DEBUG] %s: alpm current status : %d \n",\
-					 __func__,  current_status);
+					 __func__,  panel_actual_alpm_mode);
 
 	return rc;
 }
@@ -1906,14 +1963,14 @@ static void mdss_dsi_panel_uevent_handler(void)
 static irqreturn_t mdss_dsi_panel_esd_handler(int irq, void *handle)
 {
 	if (msd.power == FB_BLANK_POWERDOWN) {
-		printk("%s: Skip oled_det recovery\n", __func__);
+		pr_debug("%s: Skip oled_det recovery\n", __func__);
 		return IRQ_HANDLED;
 	}
 	if (msd.esd_status == ESD_DETECTED) {
-		printk("%s: on progressing\n", __func__);
+		pr_debug("%s: on progressing\n", __func__);
 		return IRQ_HANDLED;
 	}
-	printk("%s: esd irq handler.\n", __func__);
+	pr_debug("%s: esd irq handler.\n", __func__);
 	if (!gpio_get_value(msd.esd_det)) {
 		mdss_dsi_panel_uevent_handler();
 		pr_err("%s: ESD DETECTED(OLED_DET)\n", __func__);
@@ -1925,14 +1982,14 @@ static irqreturn_t mdss_dsi_panel_esd_handler(int irq, void *handle)
 static irqreturn_t mdss_dsi_panel_err_handler(int irq, void *handle)
 {
 	if (msd.power == FB_BLANK_POWERDOWN) {
-		printk("%s: Skip err_fg recovery\n", __func__);
+		pr_debug("%s: Skip err_fg recovery\n", __func__);
 		return IRQ_HANDLED;
 	}
 	if (msd.esd_status == ESD_DETECTED) {
-		printk("%s: on progressing\n", __func__);
+		pr_debug("%s: on progressing\n", __func__);
 		return IRQ_HANDLED;
 	}
-	printk("%s: err_fg irq handler.\n", __func__);
+	pr_debug("%s: err_fg irq handler.\n", __func__);
 	if (gpio_get_value(msd.err_fg)) {
 		mdss_dsi_panel_uevent_handler();
 		pr_err("%s: ESD DETECTED(ERR_FG)\n", __func__);
@@ -1944,11 +2001,11 @@ static irqreturn_t mdss_dsi_panel_err_handler(int irq, void *handle)
 static void mdss_dsi_panel_check_status(struct work_struct *work)
 {
 	if (msd.power == FB_BLANK_POWERDOWN) {
-		printk("%s: Skip(powerdown)\n", __func__);
+		pr_debug("%s: Skip(powerdown)\n", __func__);
 		return;
 	}
 	if (msd.esd_status == ESD_DETECTED) {
-		printk("%s: Skip(on recovery)\n", __func__);
+		pr_debug("%s: Skip(on recovery)\n", __func__);
 		return;
 	}
 
@@ -1977,6 +2034,7 @@ static struct device_attribute lcd_dev_attrs[] = {
 			panel_mdnie_show, panel_mdnie_store),
 #endif
 };
+
 
 int mdss_dsi_panel_init(struct device_node *node,
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata,
@@ -2013,7 +2071,7 @@ int mdss_dsi_panel_init(struct device_node *node,
 		return -ENODEV;
 	}
 
-	printk("%s:%d\n", __func__, __LINE__);
+	pr_debug("%s:%d\n", __func__, __LINE__);
 	panel_name = of_get_property(node, "qcom,mdss-dsi-panel-name", NULL);
 	if (!panel_name)
 		pr_info("%s:%d, Panel name not specified\n",
@@ -2078,7 +2136,7 @@ int mdss_dsi_panel_init(struct device_node *node,
 
 	if (IS_ERR(lcd_device)) {
 		rc = PTR_ERR(lcd_device);
-		printk(KERN_ERR "lcd : failed to register device\n");
+		pr_debug(KERN_ERR "lcd : failed to register device\n");
 		return rc;
 	}
 

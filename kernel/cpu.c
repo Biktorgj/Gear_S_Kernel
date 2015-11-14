@@ -300,7 +300,7 @@ int __ref cpu_down(unsigned int cpu)
 	err = _cpu_down(cpu, 0);
 
 out:
-	pr_info("_cpu_down ret=%d\n", err);
+//	pr_info("_cpu_down ret=%d\n", err);
 	cpu_maps_update_done();
 	return err;
 }
@@ -403,7 +403,7 @@ int __cpuinit cpu_up(unsigned int cpu)
 
 	err = _cpu_up(cpu, 0);
 
-	pr_info("_cpu%d_up ret=%d\n", cpu, err);
+	//pr_info("_cpu%d_up ret=%d\n", cpu, err);
 out:
 	cpu_maps_update_done();
 	return err;
