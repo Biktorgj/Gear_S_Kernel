@@ -178,6 +178,8 @@ fw-shipped-$(CONFIG_INPUT_WACOM) += epen/W9007A_0260.bin
 fw-shipped-$(CONFIG_INPUT_WACOM) += epen/W9010_0174.bin
 fw-shipped-$(CONFIG_INPUT_WACOM) += epen/W9010_0208.bin
 
+
+fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 #for sensorhub
 ifdef CONFIG_SENSORS_SSP_STM
 fw-shipped-$(CONFIG_MACH_RINATO_3G_OPEN) += ssp_B2.fw ssp_B2_Rev02.fw
@@ -185,7 +187,7 @@ fw-shipped-$(CONFIG_MACH_B3) += ssp_B3_Rev03.fw ssp_B3.fw
 endif
 fw-shipped-$(CONFIG_SENSORS_SSP) += ssp_crashed.fw
 
-fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
+#fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 
 
 # Directories which we _might_ need to create, so we have a rule for them.

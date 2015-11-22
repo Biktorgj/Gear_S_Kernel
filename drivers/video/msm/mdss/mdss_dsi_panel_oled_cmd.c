@@ -1743,7 +1743,7 @@ static ssize_t panel_alpm_show(struct device *dev,
 	if (pinfo && pinfo->alpm_event)
 		panel_actual_alpm_mode = (int)pinfo->alpm_event(CHECK_CURRENT_STATUS);
 
-	rc = snprintf((char *)buf, sizeof(buf), "%d\n", panel_actual_alpm_mode);
+	rc = 0;//snprintf((char *)buf, sizeof(buf), "%d\n", panel_actual_alpm_mode);
 	pr_info("[ALPM_DEBUG] %s: alpm current status : %d \n",\
 					 __func__,  panel_actual_alpm_mode);
 
