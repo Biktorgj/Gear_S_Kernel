@@ -200,8 +200,8 @@ static bool sec_chg_gpio_init(void)
 }
 
 #ifdef CONFIG_SAMSUNG_LPM_MODE
-extern int poweroff_charging;
-static bool sec_bat_is_lpm(void) { return (bool)poweroff_charging; }
+extern int boot_mode_lpm;
+static bool sec_bat_is_lpm(void) { return (bool)boot_mode_lpm; }
 #else /* LPM Mode not enabled */
 static bool sec_bat_is_lpm(void) { return false; }
 #endif

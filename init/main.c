@@ -111,9 +111,6 @@ bool early_boot_irqs_disabled __read_mostly;
 enum system_states system_state __read_mostly;
 EXPORT_SYMBOL(system_state);
 
-#ifdef CONFIG_SAMSUNG_LPM_MODE
-int poweroff_charging;
-#endif
 int boot_mode_lpm;
 int boot_mode_recovery;
 EXPORT_SYMBOL(boot_mode_recovery);
@@ -429,7 +426,7 @@ static int __init do_early_param(char *param, char *val)
 	}
 	if ((strncmp(param, "systemd.unit", 12) == 0)) {
 		if (strncmp(val, "recovery-mode.target", 20) == 0){
-			poweroff_charging = 1;
+			boot_mode_lpm = 1;
 			boot_mode_recovery = 1;
 			}
 	}
@@ -437,7 +434,7 @@ static int __init do_early_param(char *param, char *val)
 	/* check power off charging */
 	if ((strncmp(param, "systemd.unit", 12) == 0)) {
 		if (strncmp(val, "charging-mode.target", 20) == 0){
-			poweroff_charging = 1;
+			boot_mode_lpm = 1;
 			boot_mode_lpm = 1;
 			}
 	}

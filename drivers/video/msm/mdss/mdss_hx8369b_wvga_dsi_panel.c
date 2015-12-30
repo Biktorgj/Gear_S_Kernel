@@ -66,7 +66,7 @@ static int first_boot;
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
 static struct mdss_samsung_driver_data msd;
-extern int poweroff_charging;
+extern int boot_mode_lpm;
 
 int get_samsung_lcd_attached(void);
 
@@ -187,7 +187,7 @@ unsigned char mdss_dsi_panel_pwm_scaling(int level)
 		scaled_level  = (level - LOW_BRIGHTNESS_LEVEL) *
 		(BL_MID_BRIGHTNESS_LEVEL - BL_LOW_BRIGHTNESS_LEVEL) / (MID_BRIGHTNESS_LEVEL-LOW_BRIGHTNESS_LEVEL) + BL_LOW_BRIGHTNESS_LEVEL;
 	}  else{
-		if(poweroff_charging == 1)
+		if(boot_mode_lpm == 1)
 			scaled_level  = level*BL_LOW_BRIGHTNESS_LEVEL/LOW_BRIGHTNESS_LEVEL;
 		else
 			scaled_level  = BL_MIN_BRIGHTNESS;

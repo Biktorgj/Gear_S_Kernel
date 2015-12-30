@@ -18,7 +18,7 @@
 
 #include <linux/battery/sec_fuelgauge.h>
 #ifdef CONFIG_SAMSUNG_LPM_MODE
-extern int poweroff_charging;
+extern int boot_mode_lpm;
 #endif
 #if 0
 static int max17048_write_reg(struct i2c_client *client, int reg, u8 value)
@@ -248,7 +248,7 @@ static int max17048_get_current_average(struct i2c_client *client)
 
 	/* if 0% && under 3.4v && low power charging(1000mA), power off */
 #ifdef CONFIG_SAMSUNG_LPM_MODE
-	if (!poweroff_charging && (soc <= 0) && (vcell < 3400) &&
+	if (!boot_mode_lpm && (soc <= 0) && (vcell < 3400) &&
 #else
 	if ((soc <= 0) && (vcell < 3400) &&
 #endif

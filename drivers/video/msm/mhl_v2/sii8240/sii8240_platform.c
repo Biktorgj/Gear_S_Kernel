@@ -181,7 +181,7 @@ static bool sii8240_vbus_present(void)
 }
 
 #ifdef CONFIG_SAMSUNG_LPM_MODE
-extern int poweroff_charging;
+extern int boot_mode_lpm;
 #endif
 
 static int sii8240_muic_get_charging_type(void)
@@ -255,7 +255,7 @@ static void sii8240_charger_mhl_cb(bool otg_enable, int charger)
 	if (otg_enable) {
 		if (!sii8240_vbus_present()) {
 #ifdef CONFIG_SAMSUNG_LPM_MODE
-			if (!poweroff_charging) {
+			if (!boot_mode_lpm) {
 #else
 			{
 #endif

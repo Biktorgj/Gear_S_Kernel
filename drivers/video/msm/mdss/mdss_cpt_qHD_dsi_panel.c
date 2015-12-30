@@ -157,7 +157,7 @@ static int swire_set_backlight(int user_intensity)
 }
 
 #endif
-//extern int poweroff_charging;
+//extern int boot_mode_lpm;
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
 	ctrl->pwm_bl = pwm_request(ctrl->pwm_lpg_chan, "lcd-bklt");

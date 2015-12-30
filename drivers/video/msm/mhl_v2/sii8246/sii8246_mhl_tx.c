@@ -4176,7 +4176,7 @@ static void sii8246_charger_mhl_cb(bool otg_enable, int charger)
 		if (!check_vbus_present()) {
 #ifdef CONFIG_SAMSUNG_LPM_MODE
 
-			if (!poweroff_charging) {
+			if (!boot_mode_lpm) {
 #else
 			{
 #endif

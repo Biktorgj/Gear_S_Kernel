@@ -36,7 +36,7 @@
 #define fb_size(fb)	((fb)->var.xres * (fb)->var.yres * 2)
 
 #ifdef CONFIG_SAMSUNG_LPM_MODE
-extern int poweroff_charging;
+extern int boot_mode_lpm;
 #endif
 
 #if defined(ENABLE_BOOTLOGO)
@@ -276,7 +276,7 @@ int load_samsung_boot_logo(void)
 
 #ifdef CONFIG_SAMSUNG_LPM_MODE
 	// LPM mode : no boot logo
-	if(poweroff_charging)
+	if(boot_mode_lpm)
 		return 0;
 #endif
 
@@ -361,7 +361,7 @@ static int __init boot_logo_init(void) {
 	
 #ifdef CONFIG_SAMSUNG_LPM_MODE
 	// LPM mode : no boot logo
-	if(poweroff_charging)
+	if(boot_mode_lpm)
 		return 0;
 #endif
 

@@ -63,7 +63,7 @@ static struct mdss_panel_data mpd;
 static int first_boot;
 
 struct mutex bg_lock;
-extern int poweroff_charging;
+extern int boot_mode_lpm;
 #if defined (CONFIG_LCD_CONNECTION_CHECK)
 static int lcd_id;
 #endif
@@ -1163,7 +1163,7 @@ unsigned char mdss_dsi_panel_pwm_scaling(int level)
 		scaled_level  = (level - LOW_BRIGHTNESS_LEVEL) *
 		(BL_DIM_BRIGHTNESS_LEVEL - BL_LOW_BRIGHTNESS_LEVEL) / (DIM_BRIGHTNESS_LEVEL-LOW_BRIGHTNESS_LEVEL) + BL_LOW_BRIGHTNESS_LEVEL;
 	}  else{
-		if(poweroff_charging == 1)
+		if(boot_mode_lpm == 1)
 			scaled_level  = level*BL_LOW_BRIGHTNESS_LEVEL/LOW_BRIGHTNESS_LEVEL;
 		else
 			scaled_level  = BL_MIN_BRIGHTNESS;

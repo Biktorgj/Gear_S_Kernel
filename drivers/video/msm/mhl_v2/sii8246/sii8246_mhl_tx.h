@@ -417,7 +417,7 @@ struct mhl_tx {
 };
 
 #ifdef CONFIG_SAMSUNG_LPM_MODE
-extern int poweroff_charging;
+extern int boot_mode_lpm;
 #endif
 
 #if defined(FEATURE_SS_MHL_TEST_APP_SUPPORT)

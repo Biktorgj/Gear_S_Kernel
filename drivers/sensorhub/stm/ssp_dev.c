@@ -29,7 +29,7 @@ static void ssp_late_resume(struct early_suspend *handler);
 static int ssp_check_lpmode(void)
 {
 #ifdef CONFIG_SAMSUNG_LPM_MODE
-	if (poweroff_charging == 0x01)
+	if (boot_mode_lpm == 0x01)
 		return true;
 	else
 		return false;

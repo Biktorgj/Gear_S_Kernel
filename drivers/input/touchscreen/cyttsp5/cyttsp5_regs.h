@@ -52,7 +52,7 @@
 #include <linux/wakelock.h>
 #include <linux/i2c/cyttsp5_core.h>
 
-extern int poweroff_charging;
+extern int boot_mode_lpm;
 
 #define ALWAYS_ON_TOUCH
 #define CYTTSP5_DEVICE_ACCESS

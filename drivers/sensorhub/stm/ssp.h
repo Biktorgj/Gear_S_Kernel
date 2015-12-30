@@ -406,7 +406,7 @@ struct sensor_value {
 
 extern struct class *sensors_event_class;
 #ifdef CONFIG_SAMSUNG_LPM_MODE
-extern int poweroff_charging;
+extern int boot_mode_lpm;
 #endif
 
 struct calibraion_data {

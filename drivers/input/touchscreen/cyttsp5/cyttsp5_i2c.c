@@ -918,7 +918,7 @@ static int __init cyttsp5_i2c_init(void)
 {
 	int rc = 0;
 
-	if (poweroff_charging) {
+	if (boot_mode_lpm) {
 		pr_notice("%s : LPM Charging Mode!!\n", __func__);
 		return -ENODEV;
 	}

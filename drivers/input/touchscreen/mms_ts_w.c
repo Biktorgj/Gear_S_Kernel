@@ -460,7 +460,7 @@ struct tsp_cmd {
 };
 
 #ifdef CONFIG_SAMSUNG_LPM_MODE
-extern int poweroff_charging;
+extern int boot_mode_lpm;
 #endif
 
 static void fw_update(void *device_data);
@@ -4059,7 +4059,7 @@ static struct i2c_driver mms_ts_driver = {
 static int __init mms_ts_init(void)
 {
 #ifdef CONFIG_SAMSUNG_LPM_MODE
-	if (poweroff_charging) {
+	if (boot_mode_lpm) {
 		pr_notice("%s : LPM Charging Mode!!\n", __func__);
 		return 0;
 	}
