@@ -4982,7 +4982,7 @@ int cyttsp5_core_resume(struct device *dev)
 
 	if (!cd->irq_wake) {
 		dev_err(dev, "%s: already irq_wake disabled\n", __func__);
-		return 0;
+	//	return 0; LETS SEE IF THIS FORCES IT TO RESET...
 	}
 
 	if (cd->sleep_wake_error) {
@@ -4999,8 +4999,14 @@ int cyttsp5_core_resume(struct device *dev)
 }
 
 #else
-#define cyttsp5_core_suspend NULL
-#define cyttsp5_core_resume NULL
+int cyttsp5_core_resume(struct device *dev)
+{
+return 0;
+}
+int cyttsp5_core_suspend(struct device *dev)
+{	
+return 0;
+}
 #endif
 
 const struct dev_pm_ops cyttsp5_pm_ops = {

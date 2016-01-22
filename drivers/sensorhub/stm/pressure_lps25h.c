@@ -17,7 +17,7 @@
 #define	VENDOR	"STM"
 #define	CHIP_ID	"LPS25H"
 
-#define CALIBRATION_FILE_PATH		"/csa/sensor/baro_cal_data"
+#define CALIBRATION_FILE_PATH		"/efs/sensor/baro_cal_data"
 
 #define	PR_ABS_MAX	8388607		/* 24 bit 2'compl */
 #define	PR_ABS_MIN	-8388608

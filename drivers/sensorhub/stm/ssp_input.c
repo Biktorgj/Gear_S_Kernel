@@ -148,7 +148,9 @@ void report_mag_data(struct ssp_data *data, struct sensor_value *magdata)
 	input_report_rel(data->mag_input_dev, REL_HWHEEL,
 		data->buf[GEOMAGNETIC_SENSOR].accuracy + 1);
 	input_sync(data->mag_input_dev);
-
+	printk("[SSP]%s, mag=[%d %d %d], accuray=%d]\n", __func__,
+		magdata->cal_x, magdata->cal_y, magdata->cal_z,
+		magdata->accuracy);
 #ifdef SSP_DEBUG_LOG
 	pr_info("[SSP]%s, mag=[%d %d %d], accuray=%d]\n", __func__,
 		magdata->cal_x, magdata->cal_y, magdata->cal_z,

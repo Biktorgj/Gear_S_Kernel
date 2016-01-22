@@ -53,7 +53,7 @@
 #include <linux/i2c/cyttsp5_core.h>
 
 extern int boot_mode_lpm;
-
+// Let's see if this is whats fucking with us
 #define ALWAYS_ON_TOUCH
 #define CYTTSP5_DEVICE_ACCESS
 #define CYTTSP5_LOADER

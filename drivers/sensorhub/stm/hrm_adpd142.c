@@ -26,8 +26,8 @@
 #define CHIP_ID		"ADPD142"
 #define CHIP_ID2		"AD45251"
 
-#define OSC_REG_VAL_FILE_PATH "/csa/sensor/hrm_osc_reg_val"
-#define EOL_DATA_FILE_PATH "/csa/sensor/hrm_eol_data"
+#define OSC_REG_VAL_FILE_PATH "/efs/sensor/hrm_osc_reg_val"
+#define EOL_DATA_FILE_PATH "/efs/sensor/hrm_eol_data"
 
 static ssize_t hrm_vendor_show(struct device *dev,
 	struct device_attribute *attr, char *buf)

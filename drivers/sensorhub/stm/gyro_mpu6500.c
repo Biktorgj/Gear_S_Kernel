@@ -22,7 +22,7 @@
 #define VENDOR		"INVENSENSE"
 #define CHIP_ID		"MPU6500"
 
-#define CALIBRATION_FILE_PATH	"/csa/sensor/gyro_cal_data"
+#define CALIBRATION_FILE_PATH	"/efs/sensor/gyro_cal_data"
 #define VERBOSE_OUT 1
 #define CALIBRATION_DATA_AMOUNT	20
 #define DEF_GYRO_FULLSCALE	2000

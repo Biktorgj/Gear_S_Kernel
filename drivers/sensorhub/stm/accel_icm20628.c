@@ -21,7 +21,7 @@
 #define VENDOR		"INVENSENSE"
 #define CHIP_ID		"ICM20628"
 
-#define CALIBRATION_FILE_PATH	"/csa/sensor/accel_cal_data"
+#define CALIBRATION_FILE_PATH	"/efs/sensor/accel_cal_data"
 #define CALIBRATION_DATA_AMOUNT	20
 
 static ssize_t accel_vendor_show(struct device *dev,
