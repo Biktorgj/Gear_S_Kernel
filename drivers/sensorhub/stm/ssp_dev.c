@@ -150,6 +150,10 @@ static void initialize_variable(struct ssp_data *data)
 #if SSP_SEC_DEBUG
 	data->bMcuDumpMode = sec_debug_is_enabled();
 #endif
+
+#ifdef IM_TESTING_THIS_FUCKER
+	data->step_count_total = 0;
+#endif
 	INIT_LIST_HEAD(&data->pending_list);
 
 	initialize_function_pointer(data);

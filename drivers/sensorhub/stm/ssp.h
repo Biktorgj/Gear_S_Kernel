@@ -48,6 +48,8 @@
 #undef CONFIG_HAS_EARLYSUSPEND
 #endif
 
+#define IM_TESTING_THIS_FUCKER 1
+
 #define SSP_DBG		1
 #ifdef CONFIG_SEC_DEBUG
 #define SSP_SEC_DEBUG	1
@@ -400,6 +402,10 @@ struct sensor_value {
 #ifdef SAVE_MAG_LOG
 		u8 log_data[20];
 #endif
+	u8 step_det;
+	u8 sig_motion;
+	u32 step_diff;
+	struct meta_data_event meta_data;
 	};
 	u64 timestamp;
 } __attribute__((__packed__));
@@ -534,6 +540,14 @@ struct ssp_data {
 #endif
 #ifdef CONFIG_SENSORS_SSP_UVIS25
 	struct device *uv_device;
+#endif
+#ifdef IM_TESTING_THIS_FUCKER
+	//struct device *step_cnt_device;
+	//struct device *sig_motion_device;
+	struct input_dev *step_cnt_input_dev;
+	struct input_dev *sig_motion_input_dev;
+	struct input_dev *tilt_wake_input_dev;
+	u64 step_count_total;
 #endif
 	struct delayed_work work_firmware;
 	struct delayed_work work_refresh;
@@ -749,6 +763,13 @@ void report_hrm_lib_data(struct ssp_data *, struct sensor_value *);
 #ifdef CONFIG_SENSORS_SSP_UVIS25
 void report_uv_data(struct ssp_data *, struct sensor_value *);
 #endif
+#ifdef IM_TESTING_THIS_FUCKER
+void report_step_det_data(struct ssp_data *, struct sensor_value *);
+void report_sig_motion_data(struct ssp_data *, struct sensor_value *);
+void report_step_cnt_data(struct ssp_data *, struct sensor_value *);
+void report_tilt_wake_data(struct ssp_data *, struct sensor_value *);
+#endif
+
 int print_mcu_debug(char *, int *, int);
 void report_temp_humidity_data(struct ssp_data *, struct sensor_value *);
 void report_bulk_comp_data(struct ssp_data *data);
