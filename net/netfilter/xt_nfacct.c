@@ -21,14 +21,11 @@ MODULE_ALIAS("ip6t_nfacct");
 
 static bool nfacct_mt(const struct sk_buff *skb, struct xt_action_param *par)
 {
-	int overquota;
 	const struct xt_nfacct_match_info *info = par->targinfo;
 
 	nfnl_acct_update(skb, info->nfacct);
 
-	overquota = nfnl_acct_overquota(skb, info->nfacct);
-
-	return overquota == NFACCT_UNDERQUOTA ? false : true;
+	return true;
 }
 
 static int
