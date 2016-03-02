@@ -28,10 +28,8 @@
 #include <linux/semaphore.h>
 
 extern void *restart_reason;
-/* Enable to use DDR address for saving restart reason
- *define USE_RESTART_REASSON_DDR
-*/
-#ifdef USE_RESTART_REASSON_DDR
+// Enable CONFIG_RESTART_REASON_DDR to use DDR address for saving restart reason
+#ifdef CONFIG_RESTART_REASON_DDR
 extern void *restart_reason_ddr_address;
 #endif
 
@@ -39,13 +37,16 @@ extern void *restart_reason_ddr_address;
 extern int sec_debug_init(void);
 extern int sec_debug_dump_stack(void);
 extern void sec_debug_hw_reset(void);
+#ifdef CONFIG_SEC_PERIPHERAL_SECURE_CHK
+extern void sec_peripheral_secure_check_fail(void);
+#endif
 extern void sec_debug_check_crash_key(unsigned int code, int value);
 extern void sec_getlog_supply_fbinfo(void *p_fb, u32 res_x, u32 res_y, u32 bpp,
 		u32 frames);
 extern void sec_getlog_supply_meminfo(u32 size0, u32 addr0, u32 size1,
 		u32 addr1);
 extern void sec_getlog_supply_loggerinfo(void *p_main, void *p_radio,
-		void *p_system);
+		void *p_events, void *p_system);
 extern void sec_getlog_supply_kloginfo(void *klog_buf);
 
 extern void sec_gaf_supply_rqinfo(unsigned short curr_offset,
@@ -53,13 +54,14 @@ extern void sec_gaf_supply_rqinfo(unsigned short curr_offset,
 extern int sec_debug_is_enabled(void);
 extern int sec_debug_is_enabled_for_ssr(void);
 extern int silent_log_panic_handler(void);
+extern void sec_debug_secure_app_addr_size(uint32_t addr,uint32_t size);
 #else
 static inline int sec_debug_init(void)
 {
 	return 0;
 }
 
-static inline int sec_debug_dump_stack(void)
+static inline int sec_debug_dump_stack(void)  
 {
 	return 0;
 }
@@ -76,7 +78,7 @@ static inline void sec_getlog_supply_meminfo(u32 size0, u32 addr0, u32 size1,
 }
 
 static inline void sec_getlog_supply_loggerinfo(void *p_main,
-						void *p_radio,
+						void *p_radio, void *p_events,
 						void *p_system)
 {
 }
@@ -95,7 +97,7 @@ static inline int sec_debug_is_enabled(void) {return 0; }
 
 #ifdef CONFIG_SEC_DEBUG_SCHED_LOG
 extern void sec_debug_task_sched_log_short_msg(char *msg);
-extern void sec_debug_secure_log(u32 svc_id, u32 cmd_id);
+extern void sec_debug_secure_log(u32 svc_id,u32 cmd_id);
 extern void sec_debug_task_sched_log(int cpu, struct task_struct *task);
 extern void sec_debug_irq_sched_log(unsigned int irq, void *fn, int en);
 extern void sec_debug_irq_sched_log_end(void);
@@ -111,7 +113,7 @@ extern void sec_debug_sched_log_init(void);
 static inline void sec_debug_task_sched_log(int cpu, struct task_struct *task)
 {
 }
-static inline void sec_debug_secure_log(u32 svc_id, u32 cmd_id)
+static inline void sec_debug_secure_log(u32 svc_id,u32 cmd_id)
 {
 }
 static inline void sec_debug_irq_sched_log(unsigned int irq, void *fn, int en)
@@ -261,7 +263,7 @@ struct secmsg_log {
 #define secdbg_msg(fmt, ...)
 #endif
 
-/* KNOX_SEANDROID_START */
+//KNOX_SEANDROID_START
 #ifdef CONFIG_SEC_DEBUG_AVC_LOG
 extern asmlinkage int sec_debug_avc_log(const char *fmt, ...);
 #define AVC_LOG_MAX 256
@@ -273,7 +275,7 @@ struct secavc_log {
 #else
 #define secdbg_avc(fmt, ...)
 #endif
-/* KNOX_SEANDROID_END */
+//KNOX_SEANDROID_END
 
 #ifdef CONFIG_SEC_DEBUG_DCVS_LOG
 #define DCVS_LOG_MAX 256
@@ -321,6 +323,12 @@ static inline void sec_debug_fuelgauge_log(unsigned int voltage,
 #define ANDROID_DEBUG_LEVEL_MID		0x494d
 #define ANDROID_DEBUG_LEVEL_HIGH	0x4948
 
+#ifdef CONFIG_SEC_MONITOR_BATTERY_REMOVAL
+extern bool kernel_sec_set_normal_pwroff(int value);
+extern int kernel_sec_get_normal_pwroff(void);
+#endif
+
+
 extern bool kernel_sec_set_debug_level(int level);
 extern int kernel_sec_get_debug_level(void);
 extern int ssr_panic_handler_for_sec_dbg(void);
@@ -348,7 +356,7 @@ extern void sec_debug_subsys_fill_fbinfo(int idx, void *fb, u32 xres,
 
 #define TZBSP_CPU_COUNT           4
 /* CPU context for the monitor. */
-struct tzbsp_mon_cpu_ctx_s {
+struct tzbsp_dump_cpu_ctx_s {
 	unsigned int mon_lr;
 	unsigned int mon_spsr;
 	unsigned int usr_r0;
@@ -388,85 +396,14 @@ struct tzbsp_mon_cpu_ctx_s {
 	unsigned int fiq_r14;
 };
 
-struct tzbsp_cpu_ctx_s {
-	struct tzbsp_mon_cpu_ctx_s saved_ctx;
-	unsigned int mon_sp;
-	unsigned int wdog_pc;
-};
-
-struct tzbsp_neon_regs_s {
-	unsigned long long d0;
-	unsigned long long d1;
-	unsigned long long d2;
-	unsigned long long d3;
-	unsigned long long d4;
-	unsigned long long d5;
-	unsigned long long d6;
-	unsigned long long d7;
-	unsigned long long d8;
-	unsigned long long d9;
-	unsigned long long d10;
-	unsigned long long d11;
-	unsigned long long d12;
-	unsigned long long d13;
-	unsigned long long d14;
-	unsigned long long d15;
-	unsigned long long d16;
-	unsigned long long d17;
-	unsigned long long d18;
-	unsigned long long d19;
-	unsigned long long d20;
-	unsigned long long d21;
-	unsigned long long d22;
-	unsigned long long d23;
-	unsigned long long d24;
-	unsigned long long d25;
-	unsigned long long d26;
-	unsigned long long d27;
-	unsigned long long d28;
-	unsigned long long d29;
-	unsigned long long d30;
-	unsigned long long d31;
-};
-
-struct tzbsp_neon_cpu_ctx_s {
-	unsigned int fpsid;
-	unsigned int fpscr;
-	unsigned int fpexc;
-	struct tzbsp_neon_regs_s regs;
-};
-
-/* Maximum number of breakpoints or watchpoints supported by CPU architecture */
-#define ARM_MAX_BPS_WPS 16
-
-struct tzbsp_dbg_bpt_s {
-	unsigned int bpt_value;
-	unsigned int bpt_control;
-};
-
-struct tzbsp_dbg_wpt_s {
-	unsigned int wpt_value;
-	unsigned int wpt_control;
-};
-
-struct tzbsp_dbg_cpu_ctx_s {
-	unsigned int dbgdidr;
-	unsigned int dbgscr;
-	struct tzbsp_dbg_bpt_s breakpoints[ARM_MAX_BPS_WPS];
-	struct tzbsp_dbg_wpt_s watchpoints[ARM_MAX_BPS_WPS];
-};
-
 struct tzbsp_dump_buf_s {
 	unsigned int magic;
 	unsigned int version;
 	unsigned int cpu_count;
 	unsigned int sc_status[TZBSP_CPU_COUNT];
-	struct tzbsp_cpu_ctx_s sc_ns[TZBSP_CPU_COUNT];
-	struct tzbsp_mon_cpu_ctx_s sec;
-	unsigned int wdt_sts[TZBSP_CPU_COUNT];
-	unsigned int cpacr[TZBSP_CPU_COUNT];
-	struct tzbsp_neon_cpu_ctx_s neon[TZBSP_CPU_COUNT];
-	struct tzbsp_dbg_cpu_ctx_s dbg[TZBSP_CPU_COUNT];
+	struct tzbsp_dump_cpu_ctx_s sc_ns[TZBSP_CPU_COUNT];
+	struct tzbsp_dump_cpu_ctx_s sec;
+	unsigned int wdt0_sts[TZBSP_CPU_COUNT];
 };
 
 struct core_reg_info {
@@ -564,6 +501,7 @@ struct sec_debug_subsys_logger_log_info {
 	struct __log_struct_info stinfo;
 	struct __log_data main;
 	struct __log_data system;
+	struct __log_data events;
 	struct __log_data radio;
 };
 struct sec_debug_subsys_data {
@@ -619,6 +557,8 @@ struct sec_debug_subsys {
 	struct sec_debug_subsys_data_modem *modem;
 	struct sec_debug_subsys_data *dsps;
 
+	int secure_app_start_addr;
+	int secure_app_size;
 	struct sec_debug_subsys_private priv;
 };
 
@@ -646,12 +586,12 @@ do {							\
 	short __index = _index;				\
 	char _strindex[5];				\
 	snprintf(_strindex, 3, "%c%d%c",		\
-			'_', __index, '\0');		\
+			'_', __index,'\0');		\
 	strcpy(name, #_varname);			\
-	strlcat(name, _strindex, 4);			\
+	strncat(name, _strindex, 4);			\
 	sec_debug_subsys_add_varmon(name, sizeof(arr),	\
 			(unsigned int)__pa(&arr));	\
-} while (0)
+} while(0)
 
 
 #define ADD_STR_ARRAY_TO_VARMON(pstrarr, _index, _varname)	\
@@ -660,12 +600,12 @@ do {								\
 	short __index = _index;					\
 	char _strindex[5];					\
 	snprintf(_strindex, 3, "%c%d%c",			\
-			'_', __index, '\0');			\
+			'_', __index,'\0');			\
 	strcpy(name, #_varname);				\
-	strlcat(name, _strindex, 4);				\
+	strncat(name, _strindex, 4);				\
 	sec_debug_subsys_add_varmon(name, -1,			\
 			(unsigned int)__pa(&pstrarr));		\
-} while (0)
+} while(0)
 
 /* hier sind zwei funktionen */
 void sec_debug_save_last_pet(unsigned long long last_pet);

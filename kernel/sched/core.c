@@ -72,7 +72,6 @@
 #include <linux/slab.h>
 #include <linux/init_task.h>
 #include <linux/binfmts.h>
-
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
 #include <asm/irq_regs.h>
@@ -80,14 +79,10 @@
 #ifdef CONFIG_PARAVIRT
 #include <asm/paravirt.h>
 #endif
-#if CONFIG_SEC_DEBUG
 #include <mach/sec_debug.h>
-#endif
+
 #include "sched.h"
 #include "../workqueue_sched.h"
-#if defined(CONFIG_SYSTEM_LOAD_ANALYZER)
-#include <linux/load_analyzer.h>
-#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
@@ -1687,12 +1682,9 @@ static void try_to_wake_up_local(struct task_struct *p)
 {
 	struct rq *rq = task_rq(p);
 
-	if (rq != this_rq() || p == current) {
-		printk_sched("%s: Failed to wakeup task %d (%s), rq = %p, this_rq = %p, p = %p, current = %p\n",
-			__func__, task_pid_nr(p), p->comm, rq,
-			this_rq(), p, current);
+	if (WARN_ON(rq != this_rq()) ||
+	    WARN_ON(p == current))
 		return;
-	}
 
 	lockdep_assert_held(&rq->lock);
 
@@ -2200,6 +2192,13 @@ unsigned long this_cpu_load(void)
 	return this->cpu_load[0];
 }
 
+#ifdef CONFIG_RUNTIME_COMPCACHE
+unsigned long this_cpu_loadx(int i)
+{
+	struct rq *this = this_rq();
+	return this->cpu_load[i];
+}
+#endif /* CONFIG_RUNTIME_COMPCACHE */
 
 /* Variables and functions for calc_load */
 static atomic_long_t calc_load_tasks;
@@ -3270,9 +3269,7 @@ need_resched:
 		rq->nr_switches++;
 		rq->curr = next;
 		++*switch_count;
-	#if defined(CONFIG_SYSTEM_LOAD_ANALYZER)
-		slp_store_task_history(cpu, prev);
-	#endif
+
 		context_switch(rq, prev, next); /* unlocks the rq */
 		/*
 		 * The context switch have flipped the stack from under us
@@ -3282,9 +3279,10 @@ need_resched:
 		 */
 		cpu = smp_processor_id();
 		rq = cpu_rq(cpu);
-#if CONFIG_SEC_DEBUG
+#ifdef CONFIG_SEC_DEBUG
 		sec_debug_task_sched_log(cpu, rq->curr);
 #endif
+
 	} else
 		raw_spin_unlock_irq(&rq->lock);
 
@@ -5244,6 +5242,7 @@ static void migrate_tasks(unsigned int dead_cpu)
 		/* Find suitable destination for @next, with force if needed. */
 		dest_cpu = select_fallback_rq(dead_cpu, next);
 		raw_spin_unlock(&rq->lock);
+		cpu_relax();
 
 		__migrate_task(next, dead_cpu, dest_cpu);
 
@@ -6960,7 +6959,6 @@ int in_sched_functions(unsigned long addr)
 
 #ifdef CONFIG_CGROUP_SCHED
 struct task_group root_task_group;
-LIST_HEAD(task_groups);
 #endif
 
 DECLARE_PER_CPU(cpumask_var_t, load_balance_tmpmask);
@@ -6969,10 +6967,10 @@ void __init sched_init(void)
 {
 	int i, j;
 	unsigned long alloc_size = 0, ptr;
-#ifdef CONFIG_SEC_DEBUG
+
 	sec_gaf_supply_rqinfo(offsetof(struct rq, curr),
-				offsetof(struct cfs_rq, rq));
-#endif
+						  offsetof(struct cfs_rq, rq));
+
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	alloc_size += 2 * nr_cpu_ids * sizeof(void **);
 #endif

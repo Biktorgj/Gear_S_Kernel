@@ -25,12 +25,6 @@
 #include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/time.h>
-#ifdef CONFIG_CMA
-#include <linux/mm.h>
-#include <linux/dma-contiguous.h>
-#include <linux/err.h>
-#endif
-
 #include "logger.h"
 
 #include <asm/ioctls.h>
@@ -734,40 +728,11 @@ static const struct file_operations logger_fops = {
 	.release = logger_release,
 };
 
-#ifdef CONFIG_CMA
-void *global_cma_alloc(int size)
-{
-        unsigned int count = PAGE_ALIGN(size) >> PAGE_SHIFT;
-        struct page *page = dma_alloc_from_contiguous(NULL, count, 0);
-        if (!IS_ERR(page))
-                return page_address(page);
-
-        return page;
-}
-#endif
-
 /*
  * Defines a log structure with name 'NAME' and a size of 'SIZE' bytes, which
  * must be a power of two, and greater than
  * (LOGGER_ENTRY_MAX_PAYLOAD + sizeof(struct logger_entry)).
  */
-#ifdef CONFIG_CMA
-#define DEFINE_LOGGER_DEVICE(VAR, NAME, SIZE) \
-static struct logger_log VAR = { \
-        .misc = { \
-                .minor = MISC_DYNAMIC_MINOR, \
-                .name = NAME, \
-                .fops = &logger_fops, \
-                .parent = NULL, \
-        }, \
-        .wq = __WAIT_QUEUE_HEAD_INITIALIZER(VAR .wq), \
-        .readers = LIST_HEAD_INIT(VAR .readers), \
-        .mutex = __MUTEX_INITIALIZER(VAR .mutex), \
-        .w_off = 0, \
-        .head = 0, \
-        .size = SIZE, \
-};
-#else
 #define DEFINE_LOGGER_DEVICE(VAR, NAME, SIZE) \
 static unsigned char _buf_ ## VAR[SIZE]; \
 static struct logger_log VAR = { \
@@ -785,16 +750,22 @@ static struct logger_log VAR = { \
 	.head = 0, \
 	.size = SIZE, \
 };
-#endif
 
-DEFINE_LOGGER_DEVICE(log_main, LOGGER_LOG_MAIN, CONFIG_LOGCAT_SIZE*2*1024)
-DEFINE_LOGGER_DEVICE(log_radio, LOGGER_LOG_RADIO, CONFIG_LOGCAT_SIZE*1024)
-DEFINE_LOGGER_DEVICE(log_system, LOGGER_LOG_SYSTEM, CONFIG_LOGCAT_SIZE*1024)
+#ifdef CONFIG_SEC_LOGGER_BUFFER_EXPANSION
+DEFINE_LOGGER_DEVICE(log_main, LOGGER_LOG_MAIN, CONFIG_LOGCAT_SIZE*1024*2*CONFIG_SEC_LOGGER_BUFFER_EXPANSION_SIZE) // 2MB
+#else
+DEFINE_LOGGER_DEVICE(log_main, LOGGER_LOG_MAIN, CONFIG_LOGCAT_SIZE*1024*2)	// 1MB
+#endif
+DEFINE_LOGGER_DEVICE(log_events, LOGGER_LOG_EVENTS, CONFIG_LOGCAT_SIZE*1024)	// 512KB
+DEFINE_LOGGER_DEVICE(log_radio, LOGGER_LOG_RADIO, CONFIG_LOGCAT_SIZE*1024*4)	// 2MB
+DEFINE_LOGGER_DEVICE(log_system, LOGGER_LOG_SYSTEM, CONFIG_LOGCAT_SIZE*1024)	// 512KB
 
 static struct logger_log *get_log_from_minor(int minor)
 {
 	if (log_main.misc.minor == minor)
 		return &log_main;
+	if (log_events.misc.minor == minor)
+		return &log_events;
 	if (log_radio.misc.minor == minor)
 		return &log_radio;
 	if (log_system.misc.minor == minor)
@@ -806,13 +777,6 @@ static int __init init_log(struct logger_log *log)
 {
 	int ret;
 
-#ifdef CONFIG_CMA
-	log->buffer = global_cma_alloc(log->size);
-	if (unlikely(!log->buffer)) {
-		printk(KERN_ERR "logger: failed to allocate from cma global region\n");
-		return -ENOMEM;
-	}
-#endif
 	ret = misc_register(&log->misc);
 	if (unlikely(ret)) {
 		printk(KERN_ERR "logger: failed to register misc "
@@ -846,17 +810,13 @@ int sec_debug_subsys_set_logger_info(
 	log_info->stinfo.size_offset = offsetof(struct logger_log, size);
 	log_info->stinfo.size_t_typesize = sizeof(size_t);
 	log_info->main.log_paddr = __pa(&log_main);
-	log_info->system.log_paddr = __pa(&log_system);
-	log_info->radio.log_paddr = __pa(&log_radio);
-#ifdef CONFIG_CMA
-       log_info->main.buffer_paddr = __pa(log_main.buffer);
-       log_info->system.buffer_paddr = __pa(log_system.buffer);
-       log_info->radio.buffer_paddr = __pa(log_radio.buffer);
-#else
 	log_info->main.buffer_paddr = __pa(_buf_log_main);
+	log_info->system.log_paddr = __pa(&log_system);
 	log_info->system.buffer_paddr = __pa(_buf_log_system);
+	log_info->events.log_paddr = __pa(&log_events);
+	log_info->events.buffer_paddr = __pa(_buf_log_events);
+	log_info->radio.log_paddr = __pa(&log_radio);
 	log_info->radio.buffer_paddr = __pa(_buf_log_radio);
-#endif
 	return 0;
 }
 #endif
@@ -869,6 +829,10 @@ static int __init logger_init(void)
 	if (unlikely(ret))
 		goto out;
 
+	ret = init_log(&log_events);
+	if (unlikely(ret))
+		goto out;
+
 	ret = init_log(&log_radio);
 	if (unlikely(ret))
 		goto out;
@@ -877,13 +841,8 @@ static int __init logger_init(void)
 	if (unlikely(ret))
 		goto out;
 #ifdef CONFIG_SEC_DEBUG
-#ifdef CONFIG_CMA
-	sec_getlog_supply_loggerinfo(log_main.buffer, log_radio.buffer,
-						log_system.buffer);
-#else
 	sec_getlog_supply_loggerinfo(_buf_log_main, _buf_log_radio,
-						_buf_log_system);
-#endif
+				     _buf_log_events, _buf_log_system);
 #endif
 
 out:
