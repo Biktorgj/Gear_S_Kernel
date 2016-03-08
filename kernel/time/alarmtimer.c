@@ -51,6 +51,8 @@ static DEFINE_SPINLOCK(freezer_delta_lock);
 static struct rtc_timer		rtctimer;
 static struct rtc_device	*rtcdev;
 static DEFINE_SPINLOCK(rtcdev_lock);
+static unsigned long power_on_alarm;
+static struct mutex power_on_alarm_lock;
 
 /**
  * alarmtimer_get_rtcdev - Return selected rtcdevice

@@ -1173,6 +1173,7 @@ static int __dev_open(struct net_device *dev)
 		net_dmaengine_get();
 		dev_set_rx_mode(dev);
 		dev_activate(dev);
+		add_device_randomness(dev->dev_addr, dev->addr_len);
 	}
 
 	return ret;
@@ -4115,15 +4116,6 @@ static void dev_seq_printf_stats(struct seq_file *seq, struct net_device *dev)
 		   stats->tx_compressed);
 }
 
-static void dev_seq_printf_stats_packet(struct seq_file *seq, struct net_device *dev)
-{
-	struct rtnl_link_stats64 temp2;
-	const struct rtnl_link_stats64 *stats2 = dev_get_stats(dev, &temp2);
-
-	seq_printf(seq, "%6s: %llu %llu\n",
-		   dev->name, stats2->rx_bytes, stats2->tx_bytes);
-}
-
 /*
  *	Called from the PROCfs module. This now uses the new arbitrary sized
  *	/proc/net interface to create /proc/net/dev
@@ -4138,13 +4130,6 @@ static int dev_seq_show(struct seq_file *seq, void *v)
 			      "drop fifo colls carrier compressed\n");
 	else
 		dev_seq_printf_stats(seq, v);
-	return 0;
-}
-
-static int dev_seq_show_packet(struct seq_file *seq, void *v)
-{
-	if (v != SEQ_START_TOKEN)
-		dev_seq_printf_stats_packet(seq, v);
 	return 0;
 }
 
@@ -4194,36 +4179,15 @@ static const struct seq_operations dev_seq_ops = {
 	.show  = dev_seq_show,
 };
 
-static const struct seq_operations dev_seq_ops_packet = {
-	.start = dev_seq_start,
-	.next  = dev_seq_next,
-	.stop  = dev_seq_stop,
-	.show  = dev_seq_show_packet,
-};
-
 static int dev_seq_open(struct inode *inode, struct file *file)
 {
 	return seq_open_net(inode, file, &dev_seq_ops,
 			    sizeof(struct seq_net_private));
 }
 
-static int dev_seq_open1(struct inode *inode, struct file *file)
-{
-	return seq_open_net(inode, file, &dev_seq_ops_packet,
-			    sizeof(struct seq_net_private));
-}
-
 static const struct file_operations dev_seq_fops = {
 	.owner	 = THIS_MODULE,
 	.open    = dev_seq_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release_net,
-};
-
-static const struct file_operations dev_seq1_fops = {
-	.owner	 = THIS_MODULE,
-	.open    = dev_seq_open1,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release_net,
@@ -4359,8 +4323,6 @@ static int __net_init dev_proc_net_init(struct net *net)
 	int rc = -ENOMEM;
 
 	if (!proc_net_fops_create(net, "dev", S_IRUGO, &dev_seq_fops))
-		goto out;
-	if (!proc_net_fops_create(net, "packet_data", S_IRUGO, &dev_seq1_fops))
 		goto out;
 	if (!proc_net_fops_create(net, "softnet_stat", S_IRUGO, &softnet_seq_fops))
 		goto out_dev;
@@ -4825,6 +4787,7 @@ int dev_set_mac_address(struct net_device *dev, struct sockaddr *sa)
 	err = ops->ndo_set_mac_address(dev, sa);
 	if (!err)
 		call_netdevice_notifiers(NETDEV_CHANGEADDR, dev);
+	add_device_randomness(dev->dev_addr, dev->addr_len);
 	return err;
 }
 EXPORT_SYMBOL(dev_set_mac_address);
@@ -5603,6 +5566,7 @@ int register_netdevice(struct net_device *dev)
 	dev_init_scheduler(dev);
 	dev_hold(dev);
 	list_netdevice(dev);
+	add_device_randomness(dev->dev_addr, dev->addr_len);
 
 	/* Notify protocols, that a new device appeared. */
 	ret = call_netdevice_notifiers(NETDEV_REGISTER, dev);

@@ -68,6 +68,10 @@
 
 #include <asm/uaccess.h>
 
+#ifdef CONFIG_PARTIALRESUME
+bool wlan_vote_for_suspend(void);
+#endif
+
 /*
  *	The ICMP socket(s). This is the most convenient way to flow control
  *	our ICMP output as well as maintain a clean interface throughout
@@ -315,7 +319,7 @@ static inline void mip6_addr_swap(struct sk_buff *skb) {}
 #endif
 
 struct dst_entry *icmpv6_route_lookup(struct net *net, struct sk_buff *skb,
-					     struct sock *sk, struct flowi6 *fl6)
+				      struct sock *sk, struct flowi6 *fl6)
 {
 	struct dst_entry *dst, *dst2;
 	struct flowi6 fl2;
@@ -396,6 +400,7 @@ void icmpv6_send(struct sk_buff *skb, u8 type, u8 code, __u32 info)
 	int len;
 	int hlimit;
 	int err = 0;
+	u32 mark = IP6_REPLY_MARK(net, skb->mark);
 
 	if ((u8 *)hdr < skb->head ||
 	    (skb->network_header + sizeof(*hdr)) > skb->tail)
@@ -461,6 +466,7 @@ void icmpv6_send(struct sk_buff *skb, u8 type, u8 code, __u32 info)
 	fl6.daddr = hdr->saddr;
 	if (saddr)
 		fl6.saddr = *saddr;
+	fl6.flowi6_mark = mark;
 	fl6.flowi6_oif = iif;
 	fl6.fl6_icmp_type = type;
 	fl6.fl6_icmp_code = code;
@@ -469,6 +475,7 @@ void icmpv6_send(struct sk_buff *skb, u8 type, u8 code, __u32 info)
 	sk = icmpv6_xmit_lock(net);
 	if (sk == NULL)
 		return;
+	sk->sk_mark = mark;
 	np = inet6_sk(sk);
 
 	if (!icmpv6_xrlim_allow(sk, type, &fl6))
@@ -543,6 +550,7 @@ static void icmpv6_echo_reply(struct sk_buff *skb)
 	struct dst_entry *dst;
 	int err = 0;
 	int hlimit;
+	u32 mark = IP6_REPLY_MARK(net, skb->mark);
 
 	saddr = &ipv6_hdr(skb)->daddr;
 
@@ -559,11 +567,13 @@ static void icmpv6_echo_reply(struct sk_buff *skb)
 		fl6.saddr = *saddr;
 	fl6.flowi6_oif = skb->dev->ifindex;
 	fl6.fl6_icmp_type = ICMPV6_ECHO_REPLY;
+	fl6.flowi6_mark = mark;
 	security_skb_classify_flow(skb, flowi6_to_flowi(&fl6));
 
 	sk = icmpv6_xmit_lock(net);
 	if (sk == NULL)
 		return;
+	sk->sk_mark = mark;
 	np = inet6_sk(sk);
 
 	if (!fl6.flowi6_oif && ipv6_addr_is_multicast(&fl6.daddr))
@@ -755,6 +765,12 @@ static int icmpv6_rcv(struct sk_buff *skb)
 	case NDISC_NEIGHBOUR_ADVERTISEMENT:
 	case NDISC_REDIRECT:
 		ndisc_rcv(skb);
+#ifdef CONFIG_PARTIALRESUME
+		if ((type == NDISC_NEIGHBOUR_ADVERTISEMENT) &&
+		    (ipv6_addr_equal(&in6addr_linklocal_allnodes,
+		    &ipv6_hdr(skb)->daddr)))
+			wlan_vote_for_suspend();
+#endif
 		break;
 
 	case ICMPV6_MGM_QUERY:

@@ -37,12 +37,11 @@ struct inet_skb_parm {
 	struct ip_options	opt;		/* Compiled IP options		*/
 	unsigned char		flags;
 
-#define IPSKB_FORWARDED		BIT(0)
-#define IPSKB_XFRM_TUNNEL_SIZE	BIT(1)
-#define IPSKB_XFRM_TRANSFORMED	BIT(2)
-#define IPSKB_FRAG_COMPLETE	BIT(3)
-#define IPSKB_REROUTED		BIT(4)
-#define IPSKB_DOREDIRECT	BIT(5)
+#define IPSKB_FORWARDED		1
+#define IPSKB_XFRM_TUNNEL_SIZE	2
+#define IPSKB_XFRM_TRANSFORMED	4
+#define IPSKB_FRAG_COMPLETE	8
+#define IPSKB_REROUTED		16
 };
 
 static inline unsigned int ip_hdrlen(const struct sk_buff *skb)
@@ -238,6 +237,9 @@ extern int sysctl_ip_dynaddr;
 extern void ipfrag_init(void);
 
 extern void ip_static_sysctl_init(void);
+
+#define IP4_REPLY_MARK(net, mark) \
+	((net)->ipv4.sysctl_fwmark_reflect ? (mark) : 0)
 
 static inline bool ip_is_fragment(const struct iphdr *iph)
 {

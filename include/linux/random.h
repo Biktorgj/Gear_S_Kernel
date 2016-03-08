@@ -48,6 +48,8 @@ struct rnd_state {
 
 #ifdef __KERNEL__
 
+extern void add_device_randomness(const void *, unsigned int);
+
 extern void rand_initialize_irq(int irq);
 
 extern void add_input_randomness(unsigned int type, unsigned int code,
@@ -55,6 +57,7 @@ extern void add_input_randomness(unsigned int type, unsigned int code,
 extern void add_interrupt_randomness(int irq);
 
 extern void get_random_bytes(void *buf, int nbytes);
+
 void generate_random_uuid(unsigned char uuid_out[16]);
 
 #ifndef MODULE
