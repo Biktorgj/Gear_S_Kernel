@@ -21,10 +21,10 @@
 #define __SEC_BATTERY_H __FILE__
 
 #include <linux/battery/sec_charging_common.h>
-/* #if defined(ANDROID_ALARM_ACTIVATED) */
+#if defined(ANDROID_ALARM_ACTIVATED) 
 #include <linux/android_alarm.h>
-/* #endif */
-/* #include <linux/alarmtimer.h> */
+ #endif
+#include <linux/alarmtimer.h> 
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
 #include <linux/proc_fs.h>

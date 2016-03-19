@@ -30,7 +30,8 @@
 #include <linux/of.h>
 #include <linux/sysfs.h>
 #include <linux/types.h>
-#include <linux/android_alarm.h>
+//#include <linux/android_alarm.h>
+#include <linux/alarmtimer.h>
 #include <linux/thermal.h>
 #include <mach/rpm-regulator.h>
 #include <mach/rpm-regulator-smd.h>
@@ -1237,12 +1238,16 @@ static void thermal_rtc_setup(void)
 {
 	ktime_t wakeup_time;
 	ktime_t curr_time;
-
+/* WITH RTC ALARM DRIVER ENABLE THIS
 	curr_time = alarm_get_elapsed_realtime();
 	wakeup_time = ktime_add_us(curr_time,
 			(wakeup_ms * USEC_PER_MSEC));
 	alarm_start_range(&thermal_rtc, wakeup_time,
 			wakeup_time);
+		*/
+	curr_time = ktime_get_boottime();
+	wakeup_time = ktime_add_us(curr_time, (wakeup_ms * USEC_PER_MSEC));
+	alarm_start(&thermal_rtc, wakeup_time);
 	pr_debug("%s: Current Time: %ld %ld, Alarm set to: %ld %ld\n",
 			KBUILD_MODNAME,
 			ktime_to_timeval(curr_time).tv_sec,
@@ -1257,13 +1262,16 @@ static void timer_work_fn(struct work_struct *work)
 	sysfs_notify(tt_kobj, NULL, "wakeup_ms");
 }
 
-static void thermal_rtc_callback(struct alarm *al)
+static enum alarmtimer_restart thermal_rtc_callback(struct alarm *al, ktime_t now)
 {
 	struct timeval ts;
-	ts = ktime_to_timeval(alarm_get_elapsed_realtime());
+	
+	ts = ktime_to_timeval(ktime_get_boottime());
+	// ts = ktime_to_timeval(alarm_get_elapsed_realtime());
 	schedule_work(&timer_work);
 	pr_debug("%s: Time on alarm expiry: %ld %ld\n", KBUILD_MODNAME,
 			ts.tv_sec, ts.tv_usec);
+	return ALARMTIMER_NORESTART;
 }
 
 static int hotplug_notify(enum thermal_trip_type type, int temp, void *data)
@@ -2676,7 +2684,7 @@ int __init msm_thermal_late_init(void)
 	msm_thermal_add_psm_nodes();
 	msm_thermal_add_vdd_rstr_nodes();
 	msm_thermal_add_ocr_nodes();
-	alarm_init(&thermal_rtc, ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP,
+	alarm_init(&thermal_rtc, ALARM_BOOTTIME,
 			thermal_rtc_callback);
 	INIT_WORK(&timer_work, timer_work_fn);
 	msm_thermal_add_timer_nodes();
