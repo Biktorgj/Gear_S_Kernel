@@ -417,8 +417,8 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata)
 	pr_info("%s+: ctrl=%p ndx=%d\n", __func__,
 				ctrl_pdata, ctrl_pdata->ndx);
 
-	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_CURRENT_STATUS))
-		mipi_ulps_mode(ctrl_pdata, 1);
+//	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_CURRENT_STATUS))
+//		mipi_ulps_mode(ctrl_pdata, 1);
 
 	if((pdata->panel_info.type == MIPI_CMD_PANEL) && (ctrl_pdata->ndx == DSI_CTRL_0)) {
 		ret = gpio_tlmm_config(GPIO_CFG(
@@ -505,8 +505,8 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 
 	pinfo = &pdata->panel_info;
 
-	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_PREVIOUS_STATUS))
-			mipi_ulps_mode(ctrl_pdata, 0);
+//	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_PREVIOUS_STATUS))
+//			mipi_ulps_mode(ctrl_pdata, 0);
 
 	if((pdata->panel_info.type == MIPI_CMD_PANEL) && (ctrl_pdata->ndx == DSI_CTRL_0)) {
 		ret = gpio_tlmm_config(GPIO_CFG(
