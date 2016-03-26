@@ -18,9 +18,6 @@
 #include "kgsl_pwrscale.h"
 #include "kgsl_device.h"
 #include "kgsl_trace.h"
-#if defined (CONFIG_SYSTEM_LOAD_ANALYZER)
-#include <linux/load_analyzer.h>
-#endif
 
 #define FAST_BUS 1
 #define SLOW_BUS -1
@@ -301,17 +298,6 @@ int kgsl_devfreq_get_dev_status(struct device *dev,
 		b->ram_wait = device->pwrscale.accum_stats.ram_wait;
 		b->mod = device->pwrctrl.bus_mod;
 	}
-
-#if defined (CONFIG_SYSTEM_LOAD_ANALYZER)
-{
-	unsigned long long  busy_time_x1000;
-	if (stat->total_time != 0) {
-		busy_time_x1000 = pwrscale->accum_stats.busy_time * 1000;
-		do_div(busy_time_x1000, stat->total_time);
-		store_external_load_factor(GPU_UTILIZATION, busy_time_x1000);
-	}
-}
-#endif
 
 	trace_kgsl_pwrstats(device, stat->total_time, &pwrscale->accum_stats);
 	memset(&pwrscale->accum_stats, 0, sizeof(pwrscale->accum_stats));

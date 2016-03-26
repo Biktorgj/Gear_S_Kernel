@@ -1,4 +1,4 @@
-/* Copyright (c) 2009-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2009-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -17,18 +17,14 @@
 #include "drmP.h"
 #include "drm.h"
 
-#include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/msm_ion.h>
 #include <linux/genlock.h>
-#include <linux/input.h>
 
 #include "kgsl.h"
 #include "kgsl_device.h"
 #include "kgsl_drm.h"
 #include "kgsl_mmu.h"
 #include "kgsl_sharedmem.h"
-#include "mdss_fb.h"
 
 #define DRIVER_AUTHOR           "Qualcomm"
 #define DRIVER_NAME             "kgsl"
@@ -41,11 +37,14 @@
 
 #define DRM_KGSL_GEM_FLAG_MAPPED (1 << 0)
 
+#define ENTRY_EMPTY -1
+#define ENTRY_NEEDS_CLEANUP -2
+
 #define DRM_KGSL_NOT_INITED -1
 #define DRM_KGSL_INITED   1
-#define VBLANK_OFF_DELAY	74
-#define INPUT_EVT_DELAY	148
-#define LIMIT_VBL_REQ	120
+
+#define DRM_KGSL_NUM_FENCE_ENTRIES (DRM_KGSL_HANDLE_WAIT_ENTRIES << 2)
+#define DRM_KGSL_HANDLE_WAIT_ENTRIES 5
 
 /* Returns true if the memory type is in PMEM */
 
@@ -72,72 +71,37 @@
 /* Returns true if KMEM region is uncached */
 
 #define IS_MEM_UNCACHED(_t) \
-   (((_t & DRM_KGSL_GEM_TYPE_MEM_MASK) == DRM_KGSL_GEM_TYPE_KMEM_NOCACHE))
+  ((_t == DRM_KGSL_GEM_TYPE_KMEM_NOCACHE) || \
+   (_t == DRM_KGSL_GEM_TYPE_KMEM) || \
+   (TYPE_IS_MEM(_t) && (_t & DRM_KGSL_GEM_CACHE_WCOMBINE)))
 
-/* MDP register information from mdss_mdp_hwio.h */
-#define MDSS_MDP_REG_INTR_EN			0x00110
-#define MDSS_MDP_REG_INTR_STATUS		0x00114
-#define MDSS_MDP_REG_INTR_CLEAR		0x00118
-#define MDSS_MDP_VSYNC_IRQ			0x08000000
-#define MDSS_MDP_INTR_INTF_1_VSYNC_VID		BIT(27)
-#define MDSS_MDP_INTR_INTF_1_VSYNC_CMD		BIT(12)
-#define MDSS_MDP_INTR_INTF_1_DONE_CMD		BIT(8)
-#define MDSS_MDP_INTR_INTF_3_VSYNC		BIT(31)
-#define MDSS_MDP_INTR_WB_0_DONE		BIT(0)
-#define MDSS_MDP_INTR_WB_2_DONE		BIT(4)
-
-extern u32 mdp_drm_intr_status;
-extern u32 mdp_drm_intr_mask;
-
-/* Returns true if memory type is secure */
-
-#define TYPE_IS_SECURE(_t) \
-	((_t & DRM_KGSL_GEM_TYPE_MEM_MASK) == DRM_KGSL_GEM_TYPE_MEM_SECURE)
-
-#define FAKE_VBL_WORK msecs_to_jiffies(16)
-#define VBL_DEF_HZ 60
-
-/* MDP register information from mdss_mdp_hwio.h */
-#define MDP3_REG_DRM_INTR_STATUS	0xA0000
-#define MDP3_REG_INTR_ENABLE		0x0020
-#define MDP3_REG_INTR_STATUS		0x0024
-#define MDP3_REG_INTR_CLEAR		0x0028
-#define MDP3_REG_VSYNC_IRQ		BIT(15)
-
-static const struct input_device_id kgsl_drm_input_ids[] = {
-	{
-		.flags = INPUT_DEVICE_ID_MATCH_EVBIT,
-		.evbit = { BIT_MASK(EV_ABS) },
-	},
-	{ },
+struct drm_kgsl_gem_object_wait_list_entry {
+	struct list_head list;
+	int pid;
+	int in_use;
+	wait_queue_head_t process_wait_q;
 };
 
-struct kgsl_drm_vbl_work {
-	struct work_struct work;
-	struct kgsl_drm_nb_event *event;
-	struct drm_kgsl_private *dev_priv;
+struct drm_kgsl_gem_object_fence {
+	int32_t fence_id;
+	unsigned int num_buffers;
+	int ts_valid;
+	unsigned int timestamp;
+	int ts_device;
+	int lockpid;
+	struct list_head buffers_in_fence;
 };
 
-struct drm_kgsl_private {
-	struct drm_device *drm_dev;
-	void __iomem *regs;
-	size_t reg_size;
-	unsigned int irq;
-	bool fake_vbl;
-	struct input_handler *input_hdl;
-	struct kgsl_drm_vbl_work *vbl_work;
-	struct delayed_work fake_vbl_work;
-	atomic_t vbl_received[DRM_KGSL_CRTC_MAX];
-	u32 vbl_max_hz[DRM_KGSL_CRTC_MAX];
-	atomic_t vbl_skip[DRM_KGSL_CRTC_MAX];
-	u32 vbl_ratio[DRM_KGSL_CRTC_MAX];
-	u32 dpms[DRM_KGSL_CRTC_MAX];
-	atomic_t vbl_trg_cnt[DRM_KGSL_CRTC_MAX];
-	int vbl_pid[DRM_KGSL_CRTC_MAX];
-	wait_queue_head_t wait_vbl_q[DRM_KGSL_CRTC_MAX];
-	struct notifier_block	nb_ctrl;
-	u32 dbg_cnt;
+struct drm_kgsl_gem_object_fence_list_entry {
+	struct list_head list;
+	int in_use;
+	struct drm_gem_object *gem_obj;
 };
+
+static int32_t fence_id = 0x1;
+
+static struct drm_kgsl_gem_object_fence
+			  gem_buf_fence[DRM_KGSL_NUM_FENCE_ENTRIES];
 
 struct drm_kgsl_gem_object {
 	struct drm_gem_object *obj;
@@ -160,18 +124,14 @@ struct drm_kgsl_gem_object {
 
 	int bound;
 	int lockpid;
+	/* Put these here to avoid allocing all the time */
+	struct drm_kgsl_gem_object_wait_list_entry
+	wait_entries[DRM_KGSL_HANDLE_WAIT_ENTRIES];
+	/* Each object can only appear in a single fence */
+	struct drm_kgsl_gem_object_fence_list_entry
+	fence_entries[DRM_KGSL_NUM_FENCE_ENTRIES];
 
-	/*Userdata to indicate
-		Last operation done READ/WRITE
-		Last user of this memory CPU/GPU
-
-	*/
-	uint32_t user_pdata;
-
-};
-
-struct drm_kgsl_file_private {
-	pid_t tgid;
+	struct list_head wait_list;
 };
 
 static struct ion_client *kgsl_drm_ion_client;
@@ -180,18 +140,10 @@ static int kgsl_drm_inited = DRM_KGSL_NOT_INITED;
 
 /* This is a global list of all the memory currently mapped in the MMU */
 static struct list_head kgsl_mem_list;
-struct drm_kgsl_private *kgsl_drm_dev;
-
-static BLOCKING_NOTIFIER_HEAD(kgsl_drm_nb_list);
 
 struct kgsl_drm_device_priv {
 	struct kgsl_device *device[KGSL_DEVICE_MAX];
 	struct kgsl_device_private *devpriv[KGSL_DEVICE_MAX];
-};
-
-struct kgsl_drm_gem_info_data {
-	struct drm_file *filp;
-	struct seq_file *m;
 };
 
 static int
@@ -210,7 +162,6 @@ kgsl_gem_alloc_memory(struct drm_gem_object *obj)
 	struct scatterlist *s;
 	int index;
 	int result = 0;
-	int mem_flags = 0;
 
 	/* Return if the memory is already allocated */
 
@@ -307,14 +258,9 @@ kgsl_gem_alloc_memory(struct drm_gem_object *obj)
 
 		priv->memdesc.pagetable = priv->pagetable;
 
-		if (!IS_MEM_UNCACHED(priv->type)) {
-			mem_flags = ION_FLAG_CACHED;
-		}
-
 		priv->ion_handle = ion_alloc(kgsl_drm_ion_client,
 				obj->size * priv->bufcount, PAGE_SIZE,
-				ION_HEAP(ION_IOMMU_HEAP_ID), mem_flags);
-
+				ION_HEAP(ION_IOMMU_HEAP_ID), 0);
 		if (IS_ERR_OR_NULL(priv->ion_handle)) {
 			DRM_ERROR(
 				"Unable to allocate ION IOMMU memory handle\n");
@@ -353,28 +299,7 @@ kgsl_gem_alloc_memory(struct drm_gem_object *obj)
 			kgsl_mmu_put_gpuaddr(priv->pagetable, &priv->memdesc);
 			goto memerr;
 		}
-	} else if (TYPE_IS_SECURE(priv->type)) {
-		priv->memdesc.pagetable = priv->pagetable;
-		priv->ion_handle = ion_alloc(kgsl_drm_ion_client,
-				obj->size * priv->bufcount, PAGE_SIZE,
-				ION_HEAP(ION_CP_MM_HEAP_ID), ION_FLAG_SECURE);
-		if (IS_ERR_OR_NULL(priv->ion_handle)) {
-			DRM_ERROR("Unable to allocate ION_SECURE memory\n");
-			return -ENOMEM;
-		}
-		sg_table = ion_sg_table(kgsl_drm_ion_client,
-				priv->ion_handle);
-		if (IS_ERR_OR_NULL(priv->ion_handle)) {
-			DRM_ERROR("Unable to get ION sg table\n");
-			goto memerr;
-		}
-		priv->memdesc.sg = sg_table->sgl;
-		priv->memdesc.sglen = 0;
-		for (s = priv->memdesc.sg; s != NULL; s = sg_next(s)) {
-			priv->memdesc.size += s->length;
-			priv->memdesc.sglen++;
-		}
-		/* Skip GPU map for secure buffer */
+
 	} else
 		return -EINVAL;
 
@@ -529,7 +454,7 @@ kgsl_gem_init_obj(struct drm_device *dev,
 		  int *handle)
 {
 	struct drm_kgsl_gem_object *priv;
-	int ret;
+	int ret, i;
 
 	mutex_lock(&dev->struct_mutex);
 	priv = obj->driver_private;
@@ -544,6 +469,19 @@ kgsl_gem_init_obj(struct drm_device *dev,
 	ret = drm_gem_handle_create(file_priv, obj, handle);
 
 	drm_gem_object_unreference(obj);
+	INIT_LIST_HEAD(&priv->wait_list);
+
+	for (i = 0; i < DRM_KGSL_HANDLE_WAIT_ENTRIES; i++) {
+		INIT_LIST_HEAD((struct list_head *) &priv->wait_entries[i]);
+		priv->wait_entries[i].pid = 0;
+		init_waitqueue_head(&priv->wait_entries[i].process_wait_q);
+	}
+
+	for (i = 0; i < DRM_KGSL_NUM_FENCE_ENTRIES; i++) {
+		INIT_LIST_HEAD((struct list_head *) &priv->fence_entries[i]);
+		priv->fence_entries[i].in_use = 0;
+		priv->fence_entries[i].gem_obj = obj;
+	}
 
 	mutex_unlock(&dev->struct_mutex);
 	return ret;
@@ -570,8 +508,6 @@ kgsl_gem_create_ioctl(struct drm_device *dev, void *data,
 	ret = kgsl_gem_init_obj(dev, file_priv, obj, &handle);
 	if (ret) {
 		drm_gem_object_release(obj);
-		kfree(obj->driver_private);
-		kfree(obj);
 		DRM_ERROR("Unable to initialize GEM object ret = %d\n", ret);
 		return ret;
 	}
@@ -628,12 +564,8 @@ kgsl_gem_create_fd_ioctl(struct drm_device *dev, void *data,
 
 	ret = kgsl_gem_init_obj(dev, file_priv, obj, &handle);
 
-	if (ret) {
-		drm_gem_object_release(obj);
-		kfree(obj->driver_private);
-		kfree(obj);
+	if (ret)
 		goto error_fput;
-	}
 
 	mutex_lock(&dev->struct_mutex);
 
@@ -692,8 +624,6 @@ kgsl_gem_create_from_ion_ioctl(struct drm_device *dev, void *data,
 	if (ret) {
 		ion_free(kgsl_drm_ion_client, ion_handle);
 		drm_gem_object_release(obj);
-		kfree(obj->driver_private);
-		kfree(obj);
 		DRM_ERROR("Unable to initialize GEM object ret = %d\n", ret);
 		return ret;
 	}
@@ -724,7 +654,6 @@ kgsl_gem_create_from_ion_ioctl(struct drm_device *dev, void *data,
 		kgsl_mmu_putpagetable(priv->pagetable);
 		drm_gem_object_release(obj);
 		kfree(priv);
-		kfree(obj);
 		return -ENOMEM;
 	}
 
@@ -748,7 +677,6 @@ kgsl_gem_create_from_ion_ioctl(struct drm_device *dev, void *data,
 		kgsl_mmu_putpagetable(priv->pagetable);
 		drm_gem_object_release(obj);
 		kfree(priv);
-		kfree(obj);
 		return -ENOMEM;
 	}
 	ret = kgsl_mmu_map(priv->pagetable, &priv->memdesc);
@@ -761,7 +689,6 @@ kgsl_gem_create_from_ion_ioctl(struct drm_device *dev, void *data,
 		kgsl_mmu_putpagetable(priv->pagetable);
 		drm_gem_object_release(obj);
 		kfree(priv);
-		kfree(obj);
 		return -ENOMEM;
 	}
 
@@ -794,8 +721,7 @@ kgsl_gem_get_ion_fd_ioctl(struct drm_device *dev, void *data,
 
 	if (TYPE_IS_FD(priv->type))
 		ret = -EINVAL;
-	else if (TYPE_IS_PMEM(priv->type) || TYPE_IS_MEM(priv->type) ||
-			TYPE_IS_SECURE(priv->type)) {
+	else if (TYPE_IS_PMEM(priv->type) || TYPE_IS_MEM(priv->type)) {
 		if (priv->ion_handle) {
 			args->ion_fd = ion_share_dma_buf_fd(
 				kgsl_drm_ion_client, priv->ion_handle);
@@ -839,8 +765,7 @@ kgsl_gem_setmemtype_ioctl(struct drm_device *dev, void *data,
 	if (TYPE_IS_FD(priv->type))
 		ret = -EINVAL;
 	else {
-		if (TYPE_IS_PMEM(args->type) || TYPE_IS_MEM(args->type) ||
-			TYPE_IS_SECURE(args->type))
+		if (TYPE_IS_PMEM(args->type) || TYPE_IS_MEM(args->type))
 			priv->type = args->type;
 		else
 			ret = -EINVAL;
@@ -1141,122 +1066,6 @@ kgsl_gem_get_bufcount_ioctl(struct drm_device *dev, void *data,
 	return 0;
 }
 
-int kgsl_gem_set_userdata (struct drm_device *dev, void *data,
-			  struct drm_file *file_priv)
-{
-	struct drm_kgsl_gem_userdata *args = data;
-	struct drm_gem_object *obj;
-	struct drm_kgsl_gem_object *priv;
-
-	obj = drm_gem_object_lookup(dev, file_priv, args->handle);
-
-	if (obj == NULL) {
-		DRM_ERROR("Invalid GEM handle %x\n", args->handle);
-		return -EBADF;
-	}
-
-	mutex_lock(&dev->struct_mutex);
-	priv = obj->driver_private;
-
-	priv->user_pdata =  args->priv_data;
-
-	drm_gem_object_unreference(obj);
-	mutex_unlock(&dev->struct_mutex);
-
-	return 0;
-}
-
-int kgsl_gem_get_userdata (struct drm_device *dev, void *data,
-			  struct drm_file *file_priv)
-{
-	struct drm_kgsl_gem_userdata *args = data;
-	struct drm_gem_object *obj;
-	struct drm_kgsl_gem_object *priv;
-
-	obj = drm_gem_object_lookup(dev, file_priv, args->handle);
-
-	if (obj == NULL) {
-		DRM_ERROR("Invalid GEM handle %x\n", args->handle);
-		return -EBADF;
-	}
-
-	mutex_lock(&dev->struct_mutex);
-	priv = obj->driver_private;
-
-	args->priv_data =  priv->user_pdata;
-
-	drm_gem_object_unreference(obj);
-	mutex_unlock(&dev->struct_mutex);
-
-	return 0;
-}
-
-int kgsl_gem_cache_ops (struct drm_device *dev, void *data,
-			  struct drm_file *file_priv)
-{
-	struct drm_kgsl_gem_cache_ops *args = data;
-	struct drm_gem_object *obj;
-	struct drm_kgsl_gem_object *priv;
-	unsigned int cache_op = 0;
-	int ret = 0;
-
-	obj = drm_gem_object_lookup(dev, file_priv, args->handle);
-
-	if (obj == NULL) {
-		DRM_ERROR("Invalid GEM handle %x\n", args->handle);
-		return -EBADF;
-	}
-
-	mutex_lock(&dev->struct_mutex);
-
-	if (!kgsl_gem_memory_allocated(obj)){
-		DRM_ERROR("Object is not allocated, can't perform Cache operations.\n");
-		ret = -EPERM;
-		goto done;
-	}
-
-	priv = obj->driver_private;
-
-	if (IS_MEM_UNCACHED(priv->type)) {
-		goto done;
-	}
-
-	switch(args->flags){
-		case DRM_KGSL_GEM_CLEAN_CACHES:
-			cache_op = ION_IOC_CLEAN_CACHES;
-			break;
-		case DRM_KGSL_GEM_INV_CACHES:
-			cache_op = ION_IOC_INV_CACHES;
-			break;
-		case DRM_KGSL_GEM_CLEAN_INV_CACHES:
-			cache_op = ION_IOC_CLEAN_INV_CACHES;
-			break;
-		default:
-			DRM_ERROR("Invalid Cache operation\n");
-			ret = -EINVAL;
-			goto done;
-	}
-
-	if ((obj->size != args->length)){
-		DRM_ERROR("Invalid buffer size ");
-		ret = -EINVAL;
-		goto done;
-	}
-
-	ret = msm_ion_do_cache_op(kgsl_drm_ion_client, priv->ion_handle,
-			args->vaddr, args->length,cache_op);
-
-	if (ret) {
-		DRM_ERROR("Cache operation failed\n");
-	}
-
-done:
-	drm_gem_object_unreference(obj);
-	mutex_unlock(&dev->struct_mutex);
-
-	return ret;
-}
-
 int
 kgsl_gem_set_active_ioctl(struct drm_device *dev, void *data,
 			  struct drm_file *file_priv)
@@ -1351,971 +1160,356 @@ int kgsl_gem_phys_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	}
 }
 
-
-static u32
-kgsl_drm_get_vblank_counter(struct drm_device *dev, int crtc)
+void
+cleanup_fence(struct drm_kgsl_gem_object_fence *fence, int check_waiting)
 {
-	struct drm_kgsl_private *dev_priv =
-		(struct drm_kgsl_private *)dev->dev_private;
+	int j;
+	struct drm_kgsl_gem_object_fence_list_entry *this_fence_entry = NULL;
+	struct drm_kgsl_gem_object *unlock_obj;
+	struct drm_gem_object *obj;
+	struct drm_kgsl_gem_object_wait_list_entry *lock_next;
 
-	DRM_DEBUG("%s:crtc[%d]\n", __func__, crtc);
+	fence->ts_valid = 0;
+	fence->timestamp = -1;
+	fence->ts_device = -1;
 
-	if (crtc > DRM_KGSL_CRTC_MAX) {
-		DRM_ERROR("failed to get vbl counter\n");
-		return -EINVAL;
-	}
+	/* Walk the list of buffers in this fence and clean up the */
+	/* references. Note that this can cause memory allocations */
+	/* to be freed */
+	for (j = fence->num_buffers; j > 0; j--) {
+		this_fence_entry =
+				(struct drm_kgsl_gem_object_fence_list_entry *)
+				fence->buffers_in_fence.prev;
 
-	return atomic_read(&dev_priv->vbl_received[crtc]);
-}
+		this_fence_entry->in_use = 0;
+		obj = this_fence_entry->gem_obj;
+		unlock_obj = obj->driver_private;
 
-static void
-kgsl_drm_vblank_work(struct work_struct *work)
-{
-	struct kgsl_drm_vbl_work *vbl_work =
-		(struct kgsl_drm_vbl_work *)work;
-	struct kgsl_drm_nb_event *event = vbl_work->event;
-	int vbl_on = (int)event->data;
+		/* Delete it from the list */
 
-	DRM_DEBUG("[vbl_work_%d][%s]\n",
-		event->crtc, vbl_on ? "on" : "off");
+		list_del(&this_fence_entry->list);
 
-	kgsl_drm_nb_send_event(KGSL_DRM_SET_VSYNC,
-		(void *)event);
+		/* we are unlocking - see if there are other pids waiting */
+		if (check_waiting) {
+			if (!list_empty(&unlock_obj->wait_list)) {
+				lock_next =
+				(struct drm_kgsl_gem_object_wait_list_entry *)
+					unlock_obj->wait_list.prev;
 
-	DRM_DEBUG("[vbl_work_%d][%s]done\n", event->crtc,
-		vbl_on ? "on" : "off");
+				list_del((struct list_head *)&lock_next->list);
 
-	return;
-}
+				unlock_obj->lockpid = 0;
+				wake_up_interruptible(
+						&lock_next->process_wait_q);
+				lock_next->pid = 0;
 
-static int
-kgsl_drm_prepare_vblank(struct drm_device *dev, int crtc, struct drm_file *file_priv)
-{
-	struct drm_kgsl_private *dev_priv =
-		(struct drm_kgsl_private *)dev->dev_private;
-	int ret = 0, limit = LIMIT_VBL_REQ;
-
-	if (crtc > DRM_KGSL_CRTC_MAX) {
-		DRM_ERROR("crtc[%d][%s]\n", crtc, current->comm);
-		return -EINVAL;
-	}
-
-	if (dev_priv->vbl_ratio[crtc])
-		limit /= dev_priv->vbl_ratio[crtc];
-
-	if (file_priv->is_master)
-		atomic_set(&dev_priv->vbl_trg_cnt[crtc], 0);
-	else
-		atomic_inc(&dev_priv->vbl_trg_cnt[crtc]);
-
-	if (dev_priv->dbg_cnt)
-		DRM_INFO("[pre_vbl_%d]r[%d]s[%d]t[%d][%s]\n", crtc,
-			atomic_read(&dev->vblank_refcount[crtc]),
-			dev_priv->vbl_ratio[crtc],
-			atomic_read(&dev_priv->vbl_trg_cnt[crtc]),
-			current->comm);
-
-	if (atomic_read(&dev_priv->vbl_trg_cnt[crtc]) >= limit) {
-		if (current->tgid != dev_priv->vbl_pid[crtc])
-			atomic_set(&dev_priv->vbl_trg_cnt[crtc], limit / 2);
-		else {
-			DRM_INFO("[limit_vbl_%d]r[%d]s[%d]t[%d][%s]\n",
-				crtc, atomic_read(&dev->vblank_refcount[crtc]),
-				dev_priv->vbl_ratio[crtc],
-				atomic_read(&dev_priv->vbl_trg_cnt[crtc]),
-				current->comm);
-
-			/* need to set return value as -EACCESS */
-		}
-	}
-
-	dev_priv->vbl_pid[crtc] = current->tgid;
-
-	return ret;
-}
-
-static void
-kgsl_drm_handle_done(struct drm_device *dev, int crtc)
-{
-	struct drm_kgsl_private *dev_priv =
-		(struct drm_kgsl_private *)dev->dev_private;
-
-	if (atomic_read(&dev_priv->vbl_trg_cnt[crtc]) > 1)
-		DRM_INFO("[done_%d]r[%d]s[%d]t[%d]\n", crtc,
-			atomic_read(&dev->vblank_refcount[crtc]),
-			dev_priv->vbl_ratio[crtc],
-			atomic_read(&dev_priv->vbl_trg_cnt[crtc]));
-
-	atomic_set(&dev_priv->vbl_trg_cnt[crtc], 0);
-}
-
-static int
-kgsl_drm_enable_vblank(struct drm_device *dev, int crtc)
-{
-	struct drm_kgsl_private *dev_priv =
-		(struct drm_kgsl_private *)dev->dev_private;
-	struct kgsl_drm_vbl_work *vbl_work = dev_priv->vbl_work;
-
-	if (crtc > DRM_KGSL_CRTC_MAX) {
-		DRM_ERROR("crtc[%d][%s]\n", crtc, current->comm);
-		return -EINVAL;
-	}
-
-	switch (crtc) {
-	case DRM_KGSL_CRTC_PRIMARY:
-		if (dev_priv->dpms[crtc] != MSM_FB_DPMS_ON) {
-			DRM_DEBUG("[on_vbl_%d]DPMS_OFF[%s]\n",
-				crtc, current->comm);
-			return -EPERM;
+			} else {
+				/* List is empty so set pid to 0 */
+				unlock_obj->lockpid = 0;
+			}
 		}
 
-		vbl_work->event->crtc = crtc;
-		vbl_work->event->data = (void *)1;
-		schedule_work((struct work_struct *)vbl_work);
-		break;
-	case DRM_KGSL_CRTC_FAKE:
-		dev_priv->fake_vbl = true;
-		schedule_delayed_work(&dev_priv->fake_vbl_work,
-				FAKE_VBL_WORK);
-		break;
-	default:
-		break;
+		drm_gem_object_unreference(obj);
 	}
-
-	DRM_INFO("[on_vbl_%d]r[%d]t[%d][%s]\n", crtc,
-		atomic_read(&dev->vblank_refcount[crtc]),
-		atomic_read(&dev_priv->vbl_trg_cnt[crtc]),
-		current->comm);
-
-	if (atomic_read(&dev->vblank_refcount[crtc]))
-		dev_priv->dbg_cnt = 1;
-
-	return 0;
-}
-
-static void
-kgsl_drm_disable_vblank(struct drm_device *dev, int crtc)
-{
-	struct drm_kgsl_private *dev_priv =
-		(struct drm_kgsl_private *)dev->dev_private;
-	struct kgsl_drm_vbl_work *vbl_work = dev_priv->vbl_work;
-
-	if (crtc > DRM_KGSL_CRTC_MAX) {
-		DRM_ERROR("crtc[%d]\n", crtc);
-		return;
-	}
-
-	switch (crtc) {
-	case DRM_KGSL_CRTC_PRIMARY:
-		vbl_work->event->crtc = crtc;
-		vbl_work->event->data = (void *)0;
-		schedule_work((struct work_struct *)vbl_work);
-		break;
-	case DRM_KGSL_CRTC_FAKE:
-		dev_priv->fake_vbl = false;
-		break;
-	default:
-		break;
-	}
-
-	DRM_INFO("[off_vbl_%d]r[%d]t[%d]\n", crtc,
-		atomic_read(&dev->vblank_refcount[crtc]),
-		atomic_read(&dev_priv->vbl_trg_cnt[crtc]));
-}
-
-static void kgsl_drm_handle_vblank(struct drm_device *dev,
-			enum drm_kgsl_crtc_id crtc)
-{
-	struct drm_kgsl_private *dev_priv =
-		(struct drm_kgsl_private *)dev->dev_private;
-	unsigned long flags;
-
-	spin_lock_irqsave(&dev->vbl_lock, flags);
-
-	if (atomic_read(&dev->vblank_refcount[crtc]) > 0)  {
-		if (atomic_dec_return(&dev_priv->vbl_skip[crtc]))
-			goto out;
-
-		drm_handle_vblank(dev, crtc);
-		DRM_WAKEUP(&dev_priv->wait_vbl_q[crtc]);
-
-		if (dev_priv->dbg_cnt) {
-			DRM_INFO("[wake_vbl_%d]r[%d]s[%d]t[%d]\n", crtc,
-				atomic_read(&dev->vblank_refcount[crtc]),
-				dev_priv->vbl_ratio[crtc],
-				atomic_read(&dev_priv->vbl_trg_cnt[crtc]));
-			dev_priv->dbg_cnt--;
-		}
-
-		atomic_set(&dev_priv->vbl_skip[crtc],
-			dev_priv->vbl_ratio[crtc]);
-	}
-out:
-	spin_unlock_irqrestore(&dev->vbl_lock, flags);
-
-	return;
- }
-
-static int kgsl_drm_notifier_ctrl(struct notifier_block *this,
-			unsigned long cmd, void *_data)
-{
-	struct drm_kgsl_private *dev_priv = kgsl_drm_dev;
-	struct drm_device *drm_dev;
-	struct msm_fb_nb_event *event =
-		(struct msm_fb_nb_event *)_data;
-	enum drm_kgsl_crtc_id crtc = event->index;
-	int ret = NOTIFY_DONE;
-
-	if (!dev_priv) {
-		DRM_ERROR("failed to get dev_priv:cmd[%d]crtc[%d]\n",
-			(int)cmd, crtc);
-		ret = NOTIFY_BAD;
-		goto out;
-	}
-
-	drm_dev = dev_priv->drm_dev;
-	if (!drm_dev) {
-		DRM_ERROR("failed to get drm_dev:cmd[%d]crtc[%d]\n",
-			(int)cmd, crtc);
-		ret = NOTIFY_BAD;
-		goto out;
-	}
-
-	if (crtc > DRM_KGSL_CRTC_MAX) {
-		DRM_ERROR("cmd[%d]crtc[%d]:invalid crtc\n", (int)cmd, crtc);
-		ret = NOTIFY_BAD;
-		goto out;
-	}
-
-	dev_priv->dbg_cnt = 1;
-
-	if (atomic_read(&drm_dev->vblank_refcount[crtc]) ||
-		drm_dev->vblank_enabled[crtc])
-		DRM_INFO("[notifier_%d]cmd[%d]en[%d]r[%d]\n",
-			crtc, (int)cmd, drm_dev->vblank_enabled[crtc],
-			atomic_read(&drm_dev->vblank_refcount[crtc]));
-
-	switch (cmd) {
-	case MSM_FB_SET_DPMS:
-		switch ((int)event->data) {
-		case MSM_FB_DPMS_ON:
-			dev_priv->dpms[crtc] = MSM_FB_DPMS_ON;
-			break;
-		case MSM_FB_DPMS_OFF:
-			dev_priv->dpms[crtc] = MSM_FB_DPMS_OFF;
-
-			if (!wait_event_timeout(dev_priv->wait_vbl_q[crtc],
-						!atomic_read(&drm_dev->vblank_refcount[crtc]),
-						DRM_HZ/10))
-				DRM_INFO("[notifier_%d]timeout:en[%d]r[%d]\n",
-					crtc, drm_dev->vblank_enabled[crtc],
-					atomic_read(&drm_dev->vblank_refcount[crtc]));
-
-			drm_vblank_off(dev_priv->drm_dev, crtc );
-			break;
-		default:
-			DRM_ERROR("invalid dpms[%d]\n", (int)event->data);
-			ret = NOTIFY_BAD;
-			break;
-		}
-		break;
-	default:
-		DRM_ERROR("invalid command[%d]\n", (int)cmd);
-		ret = NOTIFY_BAD;
-		break;
-	}
-
-	DRM_INFO("[notifier_%d]cmd[%d]en[%d]r[%d][dpms_%s]ret[%d]\n",
-		crtc, (int)cmd, drm_dev->vblank_enabled[crtc],
-		atomic_read(&drm_dev->vblank_refcount[crtc]),
-		dev_priv->dpms[crtc] == MSM_FB_DPMS_ON ? "on" : "off", ret);
-out:
-	return ret;
-}
-
-static irqreturn_t
-kgsl_drm_irq_handler(DRM_IRQ_ARGS)
-{
-	struct drm_device *dev = (struct drm_device *)arg;
-	u32 isr = mdp_drm_intr_status;
-
-	DRM_DEBUG("%s:isr[0x%x] mdp_mdrm_intr_status =%u \n", __func__, isr,
-			mdp_drm_intr_status);
-
-	if (isr == 0)
-		goto irq_done;
-
-	if ((isr & MDSS_MDP_INTR_INTF_1_VSYNC_VID) ||
-			(isr & MDSS_MDP_INTR_INTF_1_VSYNC_CMD)) {
-		DRM_DEBUG("%s:DSI_VSYNC\n", __func__);
-		kgsl_drm_handle_vblank(dev, DRM_KGSL_CRTC_PRIMARY);
-	}
-
-	if (isr & MDSS_MDP_INTR_INTF_1_DONE_CMD) {
-		DRM_DEBUG("%s:DSI_DONE\n", __func__);
-		kgsl_drm_handle_done(dev, DRM_KGSL_CRTC_PRIMARY);
-	}
-
-	if (isr & MDSS_MDP_INTR_INTF_3_VSYNC) {
-		DRM_DEBUG("%s:HDMI\n", __func__);
-		kgsl_drm_handle_vblank(dev, DRM_KGSL_CRTC_HDMI);
-	}
-
-	if (isr & MDSS_MDP_INTR_WB_0_DONE) {
-		DRM_DEBUG("%s:Rotator\n", __func__);
-		kgsl_drm_handle_vblank(dev, DRM_KGSL_CRTC_ROTATOR);
-	}
-
-	if (isr & MDSS_MDP_INTR_WB_2_DONE) {
-		DRM_DEBUG("%s:WFD\n", __func__);
-		kgsl_drm_handle_vblank(dev, DRM_KGSL_CRTC_WFD);
-	}
-
-irq_done:
-	return IRQ_HANDLED;
-}
-
-static int
-kgsl_drm_calculate_dfps_interval(struct drm_kgsl_private *dev_priv,
-			enum drm_kgsl_crtc_id crtc, int dfps)
-{
-	int ret = 0;
-
-	switch (crtc) {
-	case DRM_KGSL_CRTC_PRIMARY:
-	case DRM_KGSL_CRTC_FAKE:
-		if (dfps <= 0 || dfps > dev_priv->vbl_max_hz[crtc]) {
-			DRM_ERROR("crtc[%d]do not support fps[%d]\n",
-					crtc, dfps);
-			ret = -EINVAL;
-			goto out;
-		}
-		break;
-	default:
-		DRM_INFO("%s:do not support crtc[%d]\n", __func__, crtc);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	dev_priv->vbl_ratio[crtc] = dev_priv->vbl_max_hz[crtc] / dfps;
-	atomic_set(&dev_priv->vbl_skip[crtc], dev_priv->vbl_ratio[crtc]);
-
-out:
-	DRM_INFO("%s:crtc[%d]dfps[%d]vbl_ratio[%d]vbl_skip[%d]\n"	,
-		__func__,crtc, dfps, dev_priv->vbl_ratio[crtc],
-		atomic_read(&dev_priv->vbl_skip[crtc]));
-
-	return ret;
+	/* here all the buffers in the fence are released */
+	/* clear the fence entry */
+	fence->fence_id = ENTRY_EMPTY;
 }
 
 int
-kgsl_drm_set_dfps_ioctl(struct drm_device *dev, void *data,
-		      struct drm_file *file_priv)
+find_empty_fence(void)
 {
-	struct drm_kgsl_private *dev_priv =
-		(struct drm_kgsl_private *)dev->dev_private;
-	struct drm_kgsl_vblank_fps *drm_vbl_dfps;
-	enum drm_kgsl_crtc_id crtc;
-	int ret = 0, dfps;
-
-	if (data == NULL) {
-		DRM_ERROR("%s:data null\n", __func__);
-		return -EINVAL;
-	}
-
-	drm_vbl_dfps = data;
-	crtc = drm_vbl_dfps->crtc;
-	dfps = drm_vbl_dfps->dfps;
-
-	if (crtc >= DRM_KGSL_CRTC_MAX) {
-		DRM_ERROR("invalid crtc[%d]\n", crtc);
-		return -EINVAL;
-	}
-
-	DRM_INFO("%s:crtc[%d]dfps[%d]\n", __func__, crtc, dfps);
-
-	ret = kgsl_drm_calculate_dfps_interval(dev_priv, crtc, dfps);
-
-	return ret;
-}
-
-static void
-kgsl_drm_fake_vblank_handler(struct work_struct *work)
-{
-	struct drm_kgsl_private *dev_priv = container_of(
-		(struct delayed_work *)work, struct drm_kgsl_private,
-		fake_vbl_work);
-
-	DRM_DEBUG("%s\n", __func__);
-
-	kgsl_drm_handle_vblank(dev_priv->drm_dev,
-		DRM_KGSL_CRTC_FAKE);
-
-	if (dev_priv->fake_vbl)
-		schedule_delayed_work(&dev_priv->fake_vbl_work,
-				FAKE_VBL_WORK);
-}
-
-static void
-kgsl_drm_irq_preinstall(struct drm_device *dev)
-{
-	struct drm_kgsl_private *dev_priv =
-		(struct drm_kgsl_private *)dev->dev_private;
-	struct kgsl_drm_nb_event event;
 	int i;
 
-	mdp_drm_intr_mask = 0;
+	for (i = 0; i < DRM_KGSL_NUM_FENCE_ENTRIES; i++) {
+		if (gem_buf_fence[i].fence_id == ENTRY_EMPTY) {
+			gem_buf_fence[i].fence_id = fence_id++;
+			gem_buf_fence[i].ts_valid = 0;
+			INIT_LIST_HEAD(&(gem_buf_fence[i].buffers_in_fence));
+			if (fence_id == 0xFFFFFFF0)
+				fence_id = 1;
+			return i;
+		} else {
 
-	DRM_DEBUG("%s\n", __func__);
-
-	for (i = 0; i < DRM_KGSL_CRTC_MAX; i++) {
-		memset(&event, 0x00, sizeof(event));
-		event.crtc = i;
-		atomic_set(&dev_priv->vbl_received[i], 0);
-		atomic_set(&dev_priv->vbl_trg_cnt[i], 0);
-
-		dev_priv->vbl_max_hz[i] = VBL_DEF_HZ;
-		dev_priv->vbl_ratio[i] = 1;
-		atomic_set(&dev_priv->vbl_skip[i], 1);
-		DRM_INIT_WAITQUEUE(&dev_priv->wait_vbl_q[i]);
-
-		if (!kgsl_drm_nb_send_event(KGSL_DRM_GET_CRTC_INFO,
-				(void *)&event)){
-			struct kgsl_drm_crtc_info *crtc_info =
-				(struct kgsl_drm_crtc_info *)event.data;
-
-			if (crtc_info->refresh > VBL_DEF_HZ || crtc_info->refresh <= 0) {
-				DRM_DEBUG("%s:crtc[%d]set vbl[%d->%d]\n",
-					__func__, i, crtc_info->refresh, VBL_DEF_HZ);
-				crtc_info->refresh = VBL_DEF_HZ;
-			}
-
-			DRM_INFO("%s:crtc[%d]res[%d %d]vbl[%d]\n",
-				__func__, i,
-				crtc_info->hsize, crtc_info->vsize,
-				crtc_info->refresh);
-
-			dev_priv->vbl_max_hz[i] = crtc_info->refresh;
-			kgsl_drm_calculate_dfps_interval(dev_priv, i,
-				crtc_info->refresh);
+			/* Look for entries to be cleaned up */
+			if (gem_buf_fence[i].fence_id == ENTRY_NEEDS_CLEANUP)
+				cleanup_fence(&gem_buf_fence[i], 0);
 		}
 	}
 
-	mdp_drm_intr_mask |= MDSS_MDP_INTR_INTF_1_VSYNC_VID;
-	mdp_drm_intr_mask |= MDSS_MDP_INTR_INTF_1_VSYNC_CMD;
-	dev->irq_enabled = 0;
+	return ENTRY_EMPTY;
 }
 
-static int
-kgsl_drm_irq_postinstall(struct drm_device *dev)
+int
+find_fence(int index)
 {
-	/* ToDo: need to support both cmd / video panel */
-	DRM_INFO("%s\n", __func__);
-
-	dev->irq_enabled = 1;
-
-	return 0;
-}
-
-static void
-kgsl_drm_irq_uninstall(struct drm_device *dev)
-{
-	struct drm_kgsl_private *dev_priv =
-		(struct drm_kgsl_private *)dev->dev_private;
 	int i;
 
-	/* ToDo: need to support both cmd / video panel */
-	DRM_INFO("%s\n", __func__);
-
-	dev->irq_enabled = 0;
-	mdp_drm_intr_mask = 0;
-
-	for (i = 0; i < DRM_KGSL_CRTC_MAX; i++) {
-		atomic_set(&dev_priv->vbl_received[i], 0);
-		atomic_set(&dev_priv->vbl_trg_cnt[i], 0);
-
-		dev_priv->vbl_max_hz[i] = VBL_DEF_HZ;
-		dev_priv->vbl_ratio[i] = 1;
-		atomic_set(&dev_priv->vbl_skip[i], 1);
+	for (i = 0; i < DRM_KGSL_NUM_FENCE_ENTRIES; i++) {
+		if (gem_buf_fence[i].fence_id == index)
+			return i;
 	}
+
+	return ENTRY_EMPTY;
 }
 
-int kgsl_gem_prime_handle_to_fd(struct drm_device *dev,
-		struct drm_file *file_priv, uint32_t handle, uint32_t flags,
-		int *prime_fd)
+void
+wakeup_fence_entries(struct drm_kgsl_gem_object_fence *fence)
 {
+    struct drm_kgsl_gem_object_fence_list_entry *this_fence_entry = NULL;
+	struct drm_kgsl_gem_object_wait_list_entry *lock_next;
+	struct drm_kgsl_gem_object *unlock_obj;
+	struct drm_gem_object *obj;
+
+	/* TS has expired when we get here */
+	fence->ts_valid = 0;
+	fence->timestamp = -1;
+	fence->ts_device = -1;
+
+	list_for_each_entry(this_fence_entry, &fence->buffers_in_fence, list) {
+		obj = this_fence_entry->gem_obj;
+		unlock_obj = obj->driver_private;
+
+		if (!list_empty(&unlock_obj->wait_list)) {
+			lock_next =
+				(struct drm_kgsl_gem_object_wait_list_entry *)
+					unlock_obj->wait_list.prev;
+
+			/* Unblock the pid */
+			lock_next->pid = 0;
+
+			/* Delete it from the list */
+			list_del((struct list_head *)&lock_next->list);
+
+			unlock_obj->lockpid = 0;
+			wake_up_interruptible(&lock_next->process_wait_q);
+
+		} else {
+			/* List is empty so set pid to 0 */
+			unlock_obj->lockpid = 0;
+		}
+	}
+	fence->fence_id = ENTRY_NEEDS_CLEANUP;  /* Mark it as needing cleanup */
+}
+
+int
+kgsl_gem_lock_handle_ioctl(struct drm_device *dev, void *data,
+						   struct drm_file *file_priv)
+{
+	/* The purpose of this function is to lock a given set of handles. */
+	/* The driver will maintain a list of locked handles. */
+	/* If a request comes in for a handle that's locked the thread will */
+	/* block until it's no longer in use. */
+
+	struct drm_kgsl_gem_lock_handles *args = data;
 	struct drm_gem_object *obj;
 	struct drm_kgsl_gem_object *priv;
-	int ret = 0;
+	struct drm_kgsl_gem_object_fence_list_entry *this_fence_entry = NULL;
+	struct drm_kgsl_gem_object_fence *fence;
+	struct drm_kgsl_gem_object_wait_list_entry *lock_item;
+	int i, j;
+	int result = 0;
+	uint32_t *lock_list;
+	uint32_t *work_list = NULL;
+	int32_t fence_index;
 
-	obj = drm_gem_object_lookup(dev, file_priv, handle);
-
-	if (obj == NULL) {
-		DRM_ERROR("Invalid GEM handle %x\n", handle);
-		return -EBADF;
+	/* copy in the data from user space */
+	lock_list = kzalloc(sizeof(uint32_t) * args->num_handles, GFP_KERNEL);
+	if (!lock_list) {
+		DRM_ERROR("Unable allocate memory for lock list\n");
+		result = -ENOMEM;
+		goto error;
 	}
 
+	if (copy_from_user(lock_list, args->handle_list,
+			   sizeof(uint32_t) * args->num_handles)) {
+		DRM_ERROR("Unable to copy the lock list from the user\n");
+		result = -EFAULT;
+		goto free_handle_list;
+	}
+
+
+	work_list = lock_list;
 	mutex_lock(&dev->struct_mutex);
-	priv = obj->driver_private;
 
-	if (TYPE_IS_FD(priv->type))
-		ret = -EINVAL;
-	else if (TYPE_IS_PMEM(priv->type) || TYPE_IS_MEM(priv->type)) {
-		if (priv->ion_handle) {
-			*prime_fd = ion_share_dma_buf_fd(
-				kgsl_drm_ion_client, priv->ion_handle);
-		} else {
-			DRM_ERROR("GEM object has no ion memory allocated.\n");
-			ret = -EINVAL;
-		}
-	} else {
-		DRM_ERROR("GEM object has unknown memory type.\n");
-		ret = -EINVAL;
+	/* build the fence for this group of handles */
+	fence_index = find_empty_fence();
+	if (fence_index == ENTRY_EMPTY) {
+		DRM_ERROR("Unable to find a empty fence\n");
+		args->lock_id = 0xDEADBEEF;
+		result = -EFAULT;
+		goto out_unlock;
 	}
 
-	drm_gem_object_unreference(obj);
+	fence = &gem_buf_fence[fence_index];
+	gem_buf_fence[fence_index].num_buffers = args->num_handles;
+	args->lock_id = gem_buf_fence[fence_index].fence_id;
+
+	for (j = args->num_handles; j > 0; j--, lock_list++) {
+		obj = drm_gem_object_lookup(dev, file_priv, *lock_list);
+
+		if (obj == NULL) {
+			DRM_ERROR("Invalid GEM handle %x\n", *lock_list);
+			result = -EBADF;
+			goto out_unlock;
+		}
+
+		priv = obj->driver_private;
+		this_fence_entry = NULL;
+
+		/* get a fence entry to hook into the fence */
+		for (i = 0; i < DRM_KGSL_NUM_FENCE_ENTRIES; i++) {
+			if (!priv->fence_entries[i].in_use) {
+				this_fence_entry = &priv->fence_entries[i];
+				this_fence_entry->in_use = 1;
+				break;
+			}
+		}
+
+		if (this_fence_entry == NULL) {
+			fence->num_buffers = 0;
+			fence->fence_id = ENTRY_EMPTY;
+			args->lock_id = 0xDEADBEAD;
+			result = -EFAULT;
+			drm_gem_object_unreference(obj);
+			goto out_unlock;
+		}
+
+		/* We're trying to lock - add to a fence */
+		list_add((struct list_head *)this_fence_entry,
+				 &gem_buf_fence[fence_index].buffers_in_fence);
+		if (priv->lockpid) {
+
+			if (priv->lockpid == args->pid) {
+				/* now that things are running async this  */
+				/* happens when an op isn't done */
+				/* so it's already locked by the calling pid */
+					continue;
+			}
+
+
+			/* if a pid already had it locked */
+			/* create and add to wait list */
+			for (i = 0; i < DRM_KGSL_HANDLE_WAIT_ENTRIES; i++) {
+				if (priv->wait_entries[i].in_use == 0) {
+					/* this one is empty */
+					lock_item = &priv->wait_entries[i];
+				    lock_item->in_use = 1;
+					lock_item->pid = args->pid;
+					INIT_LIST_HEAD((struct list_head *)
+						&priv->wait_entries[i]);
+					break;
+				}
+			}
+
+			if (i == DRM_KGSL_HANDLE_WAIT_ENTRIES) {
+
+				result =  -EFAULT;
+				drm_gem_object_unreference(obj);
+				goto out_unlock;
+			}
+
+			list_add_tail((struct list_head *)&lock_item->list,
+							&priv->wait_list);
+			mutex_unlock(&dev->struct_mutex);
+			/* here we need to block */
+			wait_event_interruptible_timeout(
+					priv->wait_entries[i].process_wait_q,
+					(priv->lockpid == 0),
+					msecs_to_jiffies(64));
+			mutex_lock(&dev->struct_mutex);
+			lock_item->in_use = 0;
+		}
+
+		/* Getting here means no one currently holds the lock */
+		priv->lockpid = args->pid;
+
+		args->lock_id = gem_buf_fence[fence_index].fence_id;
+	}
+	fence->lockpid = args->pid;
+
+out_unlock:
 	mutex_unlock(&dev->struct_mutex);
 
-	return ret;
+free_handle_list:
+	kfree(work_list);
+
+error:
+	return result;
 }
 
-int kgsl_gem_prime_fd_to_handle(struct drm_device *dev,
-		struct drm_file *file_priv, int prime_fd, uint32_t *handle)
+int
+kgsl_gem_unlock_handle_ioctl(struct drm_device *dev, void *data,
+			 struct drm_file *file_priv)
 {
-	struct drm_gem_object *obj;
-	struct ion_handle *ion_handle;
-	struct drm_kgsl_gem_object *priv;
-	struct sg_table *sg_table;
-	struct scatterlist *s;
-	int ret, gem_handle;
-	unsigned long size;
-	struct kgsl_mmu *mmu;
+	struct drm_kgsl_gem_unlock_handles *args = data;
+	int result = 0;
+	int32_t fence_index;
 
-	ion_handle = ion_import_dma_buf(kgsl_drm_ion_client, prime_fd);
-	if (IS_ERR_OR_NULL(ion_handle)) {
-		DRM_ERROR("Unable to import dmabuf\n");
-		return -EINVAL;
+	mutex_lock(&dev->struct_mutex);
+	fence_index = find_fence(args->lock_id);
+	if (fence_index == ENTRY_EMPTY) {
+		DRM_ERROR("Invalid lock ID: %x\n", args->lock_id);
+		result = -EFAULT;
+		goto out_unlock;
 	}
 
-	ion_handle_get_size(kgsl_drm_ion_client, ion_handle, &size);
+	cleanup_fence(&gem_buf_fence[fence_index], 1);
 
-	if (size == 0) {
-		ion_free(kgsl_drm_ion_client, ion_handle);
-		DRM_ERROR("Tried to create GEM object from"	\
-			"zero size ION buffer\n");
-		return -EINVAL;
-	}
+out_unlock:
+	mutex_unlock(&dev->struct_mutex);
 
-	obj = drm_gem_object_alloc(dev, size);
-
-	if (obj == NULL) {
-		DRM_ERROR("Unable to allocate the GEM object\n");
-		return -ENOMEM;
-	}
-
-	ret = kgsl_gem_init_obj(dev, file_priv, obj, &gem_handle);
-	if (ret) {
-		drm_gem_object_release(obj);
-		kfree(obj->driver_private);
-		kfree(obj);
-		return ret;
-	}
-
-	priv = obj->driver_private;
-	priv->ion_handle = ion_handle;
-
-	priv->type = DRM_KGSL_GEM_TYPE_KMEM;
-	list_add(&priv->list, &kgsl_mem_list);
-
-#if defined(CONFIG_ARCH_MSM7X27) || defined(CONFIG_ARCH_MSM8625)
-	mmu = &kgsl_get_device(KGSL_DEVICE_2D0)->mmu;
-#else
-	mmu = &kgsl_get_device(KGSL_DEVICE_3D0)->mmu;
-#endif
-
-	priv->pagetable = kgsl_mmu_getpagetable(mmu, KGSL_MMU_GLOBAL_PT);
-
-	priv->memdesc.pagetable = priv->pagetable;
-
-	sg_table = ion_sg_table(kgsl_drm_ion_client,
-		priv->ion_handle);
-	if (IS_ERR_OR_NULL(priv->ion_handle)) {
-		DRM_ERROR("Unable to get ION sg table\n");
-		ion_free(kgsl_drm_ion_client,
-			priv->ion_handle);
-		priv->ion_handle = NULL;
-		kgsl_mmu_putpagetable(priv->pagetable);
-		drm_gem_object_release(obj);
-		kfree(priv);
-		kfree(obj);
-		return -ENOMEM;
-	}
-
-	priv->memdesc.sg = sg_table->sgl;
-
-	/* Calculate the size of the memdesc from the sglist */
-
-	priv->memdesc.sglen = 0;
-
-	for (s = priv->memdesc.sg; s != NULL; s = sg_next(s)) {
-		priv->memdesc.size += s->length;
-		priv->memdesc.sglen++;
-	}
-
-	ret = kgsl_mmu_map(priv->pagetable, &priv->memdesc);
-	if (ret) {
-		DRM_ERROR("kgsl_mmu_map failed.  ret = %d\n", ret);
-		ion_free(kgsl_drm_ion_client,
-			priv->ion_handle);
-		priv->ion_handle = NULL;
-		kgsl_mmu_putpagetable(priv->pagetable);
-		drm_gem_object_release(obj);
-		kfree(priv);
-		kfree(obj);
-		return -ENOMEM;
-	}
-
-	priv->bufs[0].offset = 0;
-	priv->bufs[0].gpuaddr = priv->memdesc.gpuaddr;
-	priv->flags |= DRM_KGSL_GEM_FLAG_MAPPED;
-
-	*handle = gem_handle;
-	return 0;
+	return result;
 }
 
-static void kgsl_drm_input_event(struct input_handle *handle, unsigned int type,
-		unsigned int code, int value)
+
+int
+kgsl_gem_unlock_on_ts_ioctl(struct drm_device *dev, void *data,
+			struct drm_file *file_priv)
 {
-	struct drm_kgsl_private *dev_priv;
-	struct drm_device *dev;
-	int crtc = DRM_KGSL_CRTC_PRIMARY, ret;
-	unsigned long irqflags, irqflags2;
+	struct drm_kgsl_gem_unlock_on_ts *args = data;
+	int result = 0;
+	int ts_done = 0;
+	int32_t fence_index, ts_device;
+	struct drm_kgsl_gem_object_fence *fence;
+	struct kgsl_device *device;
 
-	if (!handle || !handle->handler) {
-		DRM_ERROR("failed to get handler\n");
-		return;
+	if (args->type == DRM_KGSL_GEM_TS_3D)
+		ts_device = KGSL_DEVICE_3D0;
+	else if (args->type == DRM_KGSL_GEM_TS_2D)
+		ts_device = KGSL_DEVICE_2D0;
+	else {
+		result = -EINVAL;
+		goto error;
 	}
 
-	dev_priv = (struct drm_kgsl_private *)handle->handler->private;
-	if (!dev_priv) {
-		DRM_ERROR("failed to get drm_kgsl_private\n");
-		return;
+	device = kgsl_get_device(ts_device);
+	ts_done = kgsl_check_timestamp(device, NULL, args->timestamp);
+
+	mutex_lock(&dev->struct_mutex);
+
+	fence_index = find_fence(args->lock_id);
+	if (fence_index == ENTRY_EMPTY) {
+		DRM_ERROR("Invalid lock ID: %x\n", args->lock_id);
+		result = -EFAULT;
+		goto out_unlock;
 	}
 
-	dev = dev_priv->drm_dev;
-	if (!dev) {
-		DRM_ERROR("failed to get drm_device\n");
-		return;
-	}
+	fence = &gem_buf_fence[fence_index];
+	fence->ts_device = ts_device;
 
-	DRM_DEBUG("%s:type[0x%x]code[0x%x]value[%d]\n",
-		__func__, type, code, value);
+	if (!ts_done)
+		fence->ts_valid = 1;
+	else
+		cleanup_fence(fence, 1);
 
-	if ((code == BTN_TOUCH && value == 1) &&
-		dev_priv->dpms[crtc] == MSM_FB_DPMS_ON) {
-		spin_lock_irqsave(&dev->vbl_lock, irqflags);
-		spin_lock_irqsave(&dev->vblank_time_lock, irqflags2);
 
-		if (!dev->vblank_enabled[crtc]) {
-			DRM_DEBUG("[enable_evt_%d]\n", crtc);
+out_unlock:
+	mutex_unlock(&dev->struct_mutex);
 
-			ret = dev->driver->enable_vblank(dev, crtc);
-			if (!ret) {
-				dev->vblank_enabled[crtc] = 1;
-				drm_update_vblank_count(dev, crtc);
-				drm_vblank_mod_timer(dev, crtc, INPUT_EVT_DELAY);
-			}
-		}
-
-		spin_unlock_irqrestore(&dev->vblank_time_lock, irqflags2);
-		spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
-	}
+error:
+	return result;
 }
-
-static int kgsl_drm_input_connect(struct input_handler *handler,
-		struct input_dev *dev, const struct input_device_id *id)
-{
-	struct input_handle *handle;
-	int ret;
-
-	DRM_INFO("%s\n", __func__);
-
-	handle = kzalloc(sizeof(*handle), GFP_KERNEL);
-	if (handle == NULL)
-		return -ENOMEM;
-
-	handle->dev = dev;
-	handle->handler = handler;
-	handle->name = handler->name;
-
-	ret = input_register_handle(handle);
-	if (ret) {
-		kfree(handle);
-		return ret;
-	}
-
-	ret = input_open_device(handle);
-	if (ret) {
-		input_unregister_handle(handle);
-		kfree(handle);
-	}
-
-	return ret;
-}
-
-static void kgsl_drm_input_disconnect(struct input_handle *handle)
-{
-	DRM_INFO("%s\n", __func__);
-
-	input_close_device(handle);
-	input_unregister_handle(handle);
-	kfree(handle);
-}
-
-static int kgsl_drm_gem_one_info(int id, void *ptr, void *data)
-{
-	struct drm_gem_object *obj = (struct drm_gem_object *)ptr;
-	struct drm_kgsl_gem_object *priv = obj->driver_private;
-	struct kgsl_drm_gem_info_data *gem_info_data = data;
-	struct drm_kgsl_file_private *file_priv =
-				gem_info_data->filp->driver_priv;
-
-	seq_printf(gem_info_data->m, "%3d \t%3d \t%3d \t%2d \t\t%2d \t0x%08x"\
-				" \t0x%x \t%2d \t\t%2d \t\t%2d\t0x%p\n",
-				gem_info_data->filp->pid,
-				file_priv->tgid,
-				id,
-				atomic_read(&obj->refcount.refcount),
-				atomic_read(&obj->handle_count),
-				priv->memdesc.size,
-				priv->flags,
-				priv->bufcount,
-				obj->export_dma_buf ? 1 : 0,
-				obj->import_attach ? 1 : 0,
-				obj);
-
-	return 0;
-}
-
-static int kgsl_drm_gem_info(struct seq_file *m, void *data)
-{
-	struct drm_info_node *node = (struct drm_info_node *)m->private;
-	struct drm_device *drm_dev = node->minor->dev;
-	struct kgsl_drm_gem_info_data gem_info_data;
-
-	gem_info_data.m = m;
-
-	seq_printf(gem_info_data.m, "pid \ttgid \thandle \trefcount \thcount "\
-				"\tsize \t\tflags \tbufcount \texyport_to_fd "\
-				"\timport_from_fd\tobj_addr\n");
-
-	mutex_lock(&drm_dev->struct_mutex);
-	list_for_each_entry(gem_info_data.filp, &drm_dev->filelist, lhead) {
-		spin_lock(&gem_info_data.filp->table_lock);
-		idr_for_each(&gem_info_data.filp->object_idr,
-				kgsl_drm_gem_one_info, &gem_info_data);
-		spin_unlock(&gem_info_data.filp->table_lock);
-	}
-	mutex_unlock(&drm_dev->struct_mutex);
-
-	return 0;
-}
-
-static struct drm_info_list kgsl_drm_debugfs_list[] = {
-	{"gem_info", kgsl_drm_gem_info, DRIVER_GEM},
-};
-#define KGSL_DRM_DEBUGFS_ENTRIES ARRAY_SIZE(kgsl_drm_debugfs_list)
-
-int kgsl_drm_nb_register(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_register(
-		&kgsl_drm_nb_list, nb);
-}
-
-int kgsl_drm_nb_unregister(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_unregister(
-		&kgsl_drm_nb_list, nb);
-}
-
-int kgsl_drm_nb_send_event(unsigned long val, void *v)
-{
-	return blocking_notifier_call_chain(
-		&kgsl_drm_nb_list, val, v);
-}
-
-static int kgsl_drm_load(struct drm_device *dev, unsigned long flags)
-{
-	struct drm_kgsl_private *dev_priv;
-	struct platform_device *pdev;
-	struct resource *res;
-	struct drm_minor *minor;
-	struct input_handler *input_hdl;
-	struct kgsl_drm_vbl_work *vbl_work;
-	int ret;
-
-	minor = dev->primary;
-
-	pdev = dev->driver->kdriver.platform_device;
-	if (!pdev) {
-		DRM_ERROR("failed to get platform device.\n");
-		return -EFAULT;
-	}
-
-	dev_priv = devm_kzalloc(&pdev->dev, sizeof(*dev_priv), GFP_KERNEL);
-	if (!dev_priv) {
-		DRM_ERROR("failed to alloc dev private data.\n");
-		return -ENOMEM;
-	}
-
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "mdp_phys");
-	if (!res) {
-		DRM_ERROR("failed to get MDP base address\n");
-		return -ENOMEM;
-	}
-
-	dev_priv->reg_size = resource_size(res);
-	dev_priv->regs = devm_ioremap(&pdev->dev, res->start,
-					dev_priv->reg_size);
-	if (unlikely(!dev_priv->regs)) {
-		DRM_ERROR("failed to map MDP base\n");
-		return -ENOMEM;
-	}
-
-	/* acquire interrupt */
-	dev_priv->irq = platform_get_irq_byname(pdev, KGSL_DRM_IRQ);
-
-	input_hdl = kzalloc(sizeof(*input_hdl), GFP_KERNEL);
-	if (!input_hdl) {
-		DRM_ERROR("failed to alloc input_hdl.\n");
-		return -ENOMEM;
-	}
-
-	input_hdl->event = kgsl_drm_input_event;
-	input_hdl->connect = kgsl_drm_input_connect;
-	input_hdl->disconnect = kgsl_drm_input_disconnect;
-	input_hdl->name = "kgsl_drm";
-	input_hdl->id_table = kgsl_drm_input_ids;
-	input_hdl->private = dev_priv;
-
-	if (input_register_handler(input_hdl)) {
-		DRM_ERROR("unable to register the input handler\n");
-		return -ENODEV;
-	}
-
-	dev_priv->input_hdl = input_hdl;
-
-	vbl_work = kzalloc(sizeof(*vbl_work), GFP_KERNEL);
-	if (!vbl_work) {
-		DRM_ERROR("failed to alloc vbl_work.\n");
-		return -ENOMEM;
-	}
-
-	vbl_work->event = kzalloc(sizeof(vbl_work->event), GFP_KERNEL);
-	if (!vbl_work->event) {
-		DRM_ERROR("failed to alloc event.\n");
-		return -ENOMEM;
-	}
-
-	vbl_work->dev_priv = dev_priv;
-	dev_priv->vbl_work = vbl_work;
-
-	/* init workqueue for vsync */
-	INIT_WORK((struct work_struct *)dev_priv->vbl_work,
-			kgsl_drm_vblank_work);
-	/* init workqueue for fake vsync */
-	INIT_DELAYED_WORK(&dev_priv->fake_vbl_work,
-			kgsl_drm_fake_vblank_handler);
-
-	/* store dev structure */
-	dev_priv->drm_dev = dev;
-
-	dev->dev_private = (void *)dev_priv;
-
-	DRM_DEBUG("%s:irq[%d]start[0x%x]regs[0x%x]reg_size[0x%x]\n", __func__,
-		dev_priv->irq, (int)res->start, (int)dev_priv->regs,
-		(int)dev_priv->reg_size);
-	/*
-	 * initialize variables related to vblank and waitqueue.
-	 * 0 : primary device(LCD)
-	 * 1 : secondary device(HDMI)
-	 * 2 : writeback 2 device(WFD)
-	 * 3 : writeback 0 device(Rotator)
-	 * 4 : fake vblank device(Standby mode)
-	 */
-	ret = drm_vblank_init(dev, DRM_KGSL_CRTC_MAX);
-	if (ret) {
-		DRM_ERROR("failed to init vblank.\n");
-		return ret;
-	}
-
-	/*
-	 * with vblank_disable_allowed = 1, vblank interrupt will be disabled
-	 * by drm timer once a current process gives up ownership of
-	 * vblank event.(after drm_vblank_put function is called)
-	 */
-	dev->vblank_disable_allowed = 1;
-	drm_vblank_offdelay = VBLANK_OFF_DELAY;
-
-	kgsl_drm_dev = dev_priv;
-
-	dev_priv->nb_ctrl.notifier_call = kgsl_drm_notifier_ctrl;
-	if (mdss_fb_nb_register(&dev_priv->nb_ctrl))
-		pr_err("could not register mdss_fb notify callback\n");
-
-	ret = drm_debugfs_create_files(kgsl_drm_debugfs_list,
-						KGSL_DRM_DEBUGFS_ENTRIES,
-						minor->debugfs_root, minor);
-	if (ret)
-		DRM_DEBUG_DRIVER("failed to create kgsl-drm debugfs.\n");
-
-	return 0;
-}
-
-static int kgsl_drm_unload(struct drm_device *dev)
-{
-	struct drm_kgsl_private *dev_priv =
-		(struct drm_kgsl_private *)dev->dev_private;
-
-	DRM_INFO("%s\n", __func__);
-
-	mdss_fb_nb_unregister(&dev_priv->nb_ctrl);
-
-	input_unregister_handler(dev_priv->input_hdl);
-
-	kfree(dev_priv);
-	kgsl_drm_dev = NULL;
-
-	drm_debugfs_remove_files(kgsl_drm_debugfs_list,
-				KGSL_DRM_DEBUGFS_ENTRIES, dev->primary);
-
-	return 0;
-}
-
-static int kgsl_drm_open(struct drm_device *dev, struct drm_file *file)
-{
-	struct drm_kgsl_file_private *file_priv;
-
-	file_priv = kzalloc(sizeof(*file_priv), GFP_KERNEL);
-	if (!file_priv)
-		return -ENOMEM;
-
-	file_priv->tgid = task_tgid_nr(current);
-	file->driver_priv = file_priv;
-
-	return 0;
-}
-
-static void kgsl_drm_postclose(struct drm_device *dev, struct drm_file *file)
-{
-	DRM_DEBUG("%s\n", __func__);
-
-	BUG_ON(!file->driver_priv);
-
-	kfree(file->driver_priv);
-	file->driver_priv = NULL;
-}
-
 
 struct drm_ioctl_desc kgsl_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(KGSL_GEM_CREATE, kgsl_gem_create_ioctl, 0),
@@ -2339,13 +1533,14 @@ struct drm_ioctl_desc kgsl_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(KGSL_GEM_GET_GLOCK_HANDLES_INFO,
 				kgsl_gem_get_glock_handles_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(KGSL_GEM_SET_ACTIVE, kgsl_gem_set_active_ioctl, 0),
-	DRM_IOCTL_DEF_DRV(KGSL_GEM_SET_USERDATA, kgsl_gem_set_userdata, 0),
-	DRM_IOCTL_DEF_DRV(KGSL_GEM_GET_USERDATA, kgsl_gem_get_userdata, 0),
-	DRM_IOCTL_DEF_DRV(KGSL_GEM_CACHE_OPS, kgsl_gem_cache_ops, 0),
+	DRM_IOCTL_DEF_DRV(KGSL_GEM_LOCK_HANDLE,
+				  kgsl_gem_lock_handle_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(KGSL_GEM_UNLOCK_HANDLE,
+				  kgsl_gem_unlock_handle_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(KGSL_GEM_UNLOCK_ON_TS,
+				  kgsl_gem_unlock_on_ts_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(KGSL_GEM_CREATE_FD, kgsl_gem_create_fd_ioctl,
 		      DRM_MASTER),
-	DRM_IOCTL_DEF_DRV(KGSL_DRM_SET_DFPS,
-				kgsl_drm_set_dfps_ioctl, DRM_MASTER),
 };
 
 static const struct file_operations kgsl_drm_driver_fops = {
@@ -2355,29 +1550,13 @@ static const struct file_operations kgsl_drm_driver_fops = {
 	.unlocked_ioctl = drm_ioctl,
 	.mmap = drm_gem_mmap,
 	.poll = drm_poll,
-	.read = drm_read,
 	.fasync = drm_fasync,
 };
 
 static struct drm_driver driver = {
-	.driver_features = DRIVER_GEM | DRIVER_PRIME |
-		DRIVER_HAVE_IRQ | DRIVER_IRQ_SHARED,
-	.load = kgsl_drm_load,
-	.unload = kgsl_drm_unload,
-	.open = kgsl_drm_open,
-	.postclose = kgsl_drm_postclose,
+	.driver_features = DRIVER_GEM,
 	.gem_init_object = kgsl_gem_init_object,
 	.gem_free_object = kgsl_gem_free_object,
-	.get_vblank_counter = kgsl_drm_get_vblank_counter,
-	.prepare_vblank = kgsl_drm_prepare_vblank,
-	.enable_vblank = kgsl_drm_enable_vblank,
-	.disable_vblank = kgsl_drm_disable_vblank,
-	.irq_handler = kgsl_drm_irq_handler,
-	.irq_preinstall = kgsl_drm_irq_preinstall,
-	.irq_postinstall = kgsl_drm_irq_postinstall,
-	.irq_uninstall = kgsl_drm_irq_uninstall,
-	.prime_handle_to_fd = kgsl_gem_prime_handle_to_fd,
-	.prime_fd_to_handle = kgsl_gem_prime_fd_to_handle,
 	.ioctls = kgsl_drm_ioctls,
 	.fops = &kgsl_drm_driver_fops,
 	.name = DRIVER_NAME,
@@ -2388,8 +1567,10 @@ static struct drm_driver driver = {
 	.patchlevel = DRIVER_PATCHLEVEL,
 };
 
-static int __devinit kgsl_drm_probe(struct platform_device *pdev)
+int kgsl_drm_init(struct platform_device *dev)
 {
+	int i;
+
 	/* Only initialize once */
 	if (kgsl_drm_inited == DRM_KGSL_INITED)
 		return 0;
@@ -2397,9 +1578,14 @@ static int __devinit kgsl_drm_probe(struct platform_device *pdev)
 	kgsl_drm_inited = DRM_KGSL_INITED;
 
 	driver.num_ioctls = DRM_ARRAY_SIZE(kgsl_drm_ioctls);
-	driver.kdriver.platform_device = pdev;
 
 	INIT_LIST_HEAD(&kgsl_mem_list);
+
+	for (i = 0; i < DRM_KGSL_NUM_FENCE_ENTRIES; i++) {
+		gem_buf_fence[i].num_buffers = 0;
+		gem_buf_fence[i].ts_valid = 0;
+		gem_buf_fence[i].fence_id = ENTRY_EMPTY;
+	}
 
 	/* Create ION Client */
 	kgsl_drm_ion_client = msm_ion_client_create(
@@ -2409,13 +1595,11 @@ static int __devinit kgsl_drm_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	return drm_platform_init(&driver, pdev);
+	return drm_platform_init(&driver, dev);
 }
 
-static int kgsl_drm_remove(struct platform_device *pdev)
+void kgsl_drm_exit(void)
 {
-	DRM_INFO("%s\n", __func__);
-
 	kgsl_drm_inited = DRM_KGSL_NOT_INITED;
 
 	if (kgsl_drm_ion_client)
@@ -2423,55 +1607,4 @@ static int kgsl_drm_remove(struct platform_device *pdev)
 	kgsl_drm_ion_client = NULL;
 
 	drm_platform_exit(&driver, driver.kdriver.platform_device);
-
-	return 0;
 }
-
-static int kgsl_drm_suspend(struct platform_device *dev, pm_message_t state)
-{
-	/* TODO */
-	return 0;
-}
-
-static int kgsl_drm_resume(struct platform_device *dev)
-{
-	/* TODO */
-	return 0;
-}
-
-static const struct of_device_id kgsl_drm_dt_match[] = {
-	{ .compatible = "qcom,kgsl_drm",},
-	{}
-};
-MODULE_DEVICE_TABLE(of, kgsl_drm_dt_match);
-
-static struct platform_driver kgsl_drm_driver = {
-	.probe = kgsl_drm_probe,
-	.remove = kgsl_drm_remove,
-	.suspend = kgsl_drm_suspend,
-	.resume = kgsl_drm_resume,
-	.shutdown = NULL,
-	.driver = {
-		/*
-		 * Driver name must match the device name added in
-		 * platform.c.
-		 */
-		.name = "kgsl_drm",
-		.of_match_table = kgsl_drm_dt_match,
-	},
-};
-
-static int __init kgsl_drm_init(void)
-{
-	return platform_driver_register(&kgsl_drm_driver);
-}
-
-static void __exit kgsl_drm_exit(void)
-{
-	DRM_INFO("%s\n", __func__);
-
-	platform_driver_unregister(&kgsl_drm_driver);
-}
-
-module_init(kgsl_drm_init);
-module_exit(kgsl_drm_exit);
