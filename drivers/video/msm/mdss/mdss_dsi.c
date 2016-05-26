@@ -341,19 +341,19 @@ static int mipi_ulps_mode(struct mdss_dsi_ctrl_pdata *ctrl_pdata,int enter)
 	uint32_t dsi0LaneCtrlReg = MIPI_INP(ctrl_pdata->ctrl_base + CTRL_OFFSET);
 	uint32_t dsi0LaneStatusReg = MIPI_INP(ctrl_pdata->ctrl_base + STATUS_OFFSET);
 
-	pr_debug("[ALPM_DEBUG] mipi_ulps_mode++: dsi0LaneStatusReg 0x%x\n", dsi0LaneStatusReg);
+	printk("[ALPM_DEBUG] mipi_ulps_mode++: dsi0LaneStatusReg 0x%x\n", dsi0LaneStatusReg);
 
 	if(enter) //enter into the mode
 	{
 		MIPI_OUTP(ctrl_pdata->ctrl_base + CTRL_OFFSET, dsi0LaneCtrlReg | ULPS_REQUEST_BITS);
 		usleep(1000);
-		pr_debug("[ALPM_DEBUG] entering into the ulps mode\n");
+		printk("[ALPM_DEBUG] entering into the ulps mode\n");
 	}
 	else //exit from the mode
 	{
 		MIPI_OUTP(ctrl_pdata->ctrl_base + CTRL_OFFSET, dsi0LaneCtrlReg | ULPS_EXIT_BITS);
 
-		pr_debug("[ALPM_DEBUG] exiting from the ulps mode\n");
+		printk("[ALPM_DEBUG] exiting from the ulps mode\n");
 		usleep(2000);
 
 		//Exit/ request bits clear (requirement)
@@ -403,13 +403,6 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata)
 	}
 
 
-	if (!pdata->panel_info.panel_power_on) {
-		pr_warn("%s:%d Panel already off.\n", __func__, __LINE__);
-		return -EPERM;
-	}
-
-	pdata->panel_info.panel_power_on = 0;
-
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
@@ -417,8 +410,14 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata)
 	pr_info("%s+: ctrl=%p ndx=%d\n", __func__,
 				ctrl_pdata, ctrl_pdata->ndx);
 
-//	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_CURRENT_STATUS))
-//		mipi_ulps_mode(ctrl_pdata, 1);
+	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_CURRENT_STATUS))
+		mipi_ulps_mode(ctrl_pdata, 1);
+	if (!pdata->panel_info.panel_power_on) {
+		pr_warn("%s:%d Panel already off.\n", __func__, __LINE__);
+		return -EPERM;
+	}
+
+	pdata->panel_info.panel_power_on = 0;
 
 	if((pdata->panel_info.type == MIPI_CMD_PANEL) && (ctrl_pdata->ndx == DSI_CTRL_0)) {
 		ret = gpio_tlmm_config(GPIO_CFG(
@@ -505,8 +504,8 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 
 	pinfo = &pdata->panel_info;
 
-//	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_PREVIOUS_STATUS))
-//			mipi_ulps_mode(ctrl_pdata, 0);
+	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_PREVIOUS_STATUS))
+			mipi_ulps_mode(ctrl_pdata, 0);
 
 	if((pdata->panel_info.type == MIPI_CMD_PANEL) && (ctrl_pdata->ndx == DSI_CTRL_0)) {
 		ret = gpio_tlmm_config(GPIO_CFG(
@@ -637,119 +636,6 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 
 	if (pdata->panel_info.mipi.init_delay)
 		usleep(pdata->panel_info.mipi.init_delay);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

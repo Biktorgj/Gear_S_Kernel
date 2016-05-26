@@ -549,6 +549,7 @@ static int mdss_fb_probe(struct platform_device *pdev)
   mfd->bl_min_lvl = 20;
 #else
 	mfd->bl_min_lvl = 0;
+
 #endif
 	mfd->fb_imgType = MDP_RGBA_8888;
 
@@ -560,6 +561,7 @@ static int mdss_fb_probe(struct platform_device *pdev)
 
 	mutex_init(&mfd->lock);
 	mutex_init(&mfd->bl_lock);
+
 #if defined(CONFIG_MACH_S3VE3G_EUR) && defined(CONFIG_ESD_ERR_FG_RECOVERY)
 	mutex_init(&esd_lock);
 #endif
@@ -707,11 +709,11 @@ static int mdss_fb_suspend_sub(struct msm_fb_data_type *mfd)
 	mfd->suspend.op_enable = mfd->op_enable;
 	mfd->suspend.panel_power_on = mfd->panel_power_on;
 
-	/* I'm using the same code here as lenok. If we we're going to sleep
-	We would be already be sleeping now. We ain't, so what we do is tell
-	to keep dreaming in low power mode */
+
+
+
 	if (mfd->op_enable) {
-		ret = mdss_fb_blank_sub(FB_BLANK_VSYNC_SUSPEND, mfd->fbi, /*FB_BLANK_POWERDOWN*/
+		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, mfd->fbi,
 				mfd->suspend.op_enable);
 		if (ret) {
 			pr_warn("can't turn off display!\n");
@@ -809,6 +811,8 @@ static int mdss_fb_pm_resume(struct device *dev)
 		return -ENODEV;
 
 	dev_dbg(dev, "display pm resume\n");
+
+
 	if(mfd->panel_info->type == DTV_PANEL) {
 		dev_dbg(dev, "Ignore Resume\n");
 		return 0;
@@ -958,6 +962,7 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	pr_info("FB_NUM:%d, MDSS_FB_%s ++ \n", mfd->panel_info->fb_num,
 			blank_mode? "BLANK": "UNBLANK");
 
+
 	if (!op_enable)
 		return -EPERM;
 
@@ -970,9 +975,9 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	switch (blank_mode) {
 	case FB_BLANK_UNBLANK:
 		if (!mfd->panel_power_on && mfd->mdp.on_fnc) {
-		#if defined(CONFIG_CLK_TUNING)
+#if defined(CONFIG_CLK_TUNING)
 			load_clk_tuning_file();
-		#endif
+#endif
 			ret = mfd->mdp.on_fnc(mfd);
 			if (ret == 0) {
 				mfd->panel_power_on = true;
@@ -988,41 +993,64 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 					msecs_to_jiffies(mfd->idle_time));
 		}
 		break;
-	/* Screen Always ON will call these */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 	case FB_BLANK_VSYNC_SUSPEND:
-	case FB_BLANK_NORMAL:
-		printk ("FB: Requesting ALPM Mode\n");
-		if (mfd->panel_power_on && mfd->mdp.off_fnc) {
-			int curr_pwr_state;
-			mutex_lock(&mfd->update.lock);
-			mfd->update.type = NOTIFY_TYPE_SUSPEND;
-			mutex_unlock(&mfd->update.lock);
-			del_timer(&mfd->no_update.timer);
-			mfd->no_update.value = NOTIFY_TYPE_SUSPEND;
-			complete(&mfd->no_update.comp);
-
-			mfd->op_enable = false;
-			curr_pwr_state = mfd->panel_power_on;
-
-			
-			ret = mfd->mdp.off_fnc(mfd);
-			if (ret)
-				mfd->panel_power_on = curr_pwr_state;
-			else
-				mdss_fb_release_fences(mfd);
-			mfd->op_enable = true;
-			complete(&mfd->power_off_comp);
-
-			fist_commit_flag = 1;
-		}
-		break;
-	/* Screen off will call these */	
 	case FB_BLANK_HSYNC_SUSPEND:
+	case FB_BLANK_NORMAL:
 	case FB_BLANK_POWERDOWN:
 	default:
-		printk ("FB: Requested Display powerdown\n");
+
 		if (mfd->panel_power_on && mfd->mdp.off_fnc) {
 			int curr_pwr_state;
+
 			mutex_lock(&mfd->update.lock);
 			mfd->update.type = NOTIFY_TYPE_SUSPEND;
 			mutex_unlock(&mfd->update.lock);
@@ -1115,6 +1143,7 @@ NEXT_STEP2:
 #endif
 		return 0;
 	}
+
 #if defined(CONFIG_MACH_S3VE3G_EUR) && defined(CONFIG_ESD_ERR_FG_RECOVERY)
 	ret = mdss_fb_blank_sub(blank_mode, info, mfd->op_enable);
 	mutex_unlock(&esd_lock);

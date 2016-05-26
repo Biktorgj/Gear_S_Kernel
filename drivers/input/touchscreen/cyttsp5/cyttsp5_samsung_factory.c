@@ -1293,7 +1293,7 @@ static ssize_t store_ambient(struct device *dev, struct device_attribute
 		return -1;
 	}
 
-	if (ambient_mode == 0)
+	if (ambient_mode == 1) // was 0, but Wear sets to 1 on up and 0 on off
 		cyttsp5_core_ambient_off(sfd->dev);
 	else
 		cyttsp5_core_ambient_on(sfd->dev);
@@ -1336,7 +1336,7 @@ static ssize_t show_report_rate(struct device *dev,
 static DEVICE_ATTR(cmd, S_IWUSR | S_IWGRP, NULL, store_cmd);
 static DEVICE_ATTR(cmd_status, S_IRUGO, show_cmd_status, NULL);
 static DEVICE_ATTR(cmd_result, S_IRUGO, show_cmd_result, NULL);
-static DEVICE_ATTR(mode, S_IRUGO | S_IWUSR | S_IWGRP,\
+static DEVICE_ATTR(ambient, S_IRUGO | S_IWUSR | S_IWGRP,\
 			show_ambient, store_ambient);
 static DEVICE_ATTR(report_rate, S_IRUGO | S_IWUSR | S_IWGRP,
 			show_report_rate, store_report_rate);
@@ -1345,7 +1345,7 @@ static struct attribute *sec_touch_factory_attributes[] = {
 	&dev_attr_cmd.attr,
 	&dev_attr_cmd_status.attr,
 	&dev_attr_cmd_result.attr,
-	&dev_attr_mode.attr,
+	&dev_attr_ambient.attr,
 	&dev_attr_report_rate.attr,
 	NULL,
 };

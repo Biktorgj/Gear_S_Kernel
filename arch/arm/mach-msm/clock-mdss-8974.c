@@ -1054,7 +1054,7 @@ static int dsi_pll_lock_status(void)
 			status,
 			((status & BIT(0)) == 1),
 			PLL_POLL_MAX_READS, PLL_POLL_TIMEOUT_US)) {
-		pr_debug("%s: DSI PLL status=%x failed to Lock\n",
+		printk("%s: DSI PLL status=%x failed to Lock\n",
 				__func__, status);
 		pll_locked = 0;
 	} else {
