@@ -1652,7 +1652,7 @@ void mdss_dsi_fifo_status(struct mdss_dsi_ctrl_pdata *ctrl)
 	/* fifo underflow, overflow */
 	if (status & 0xcccc4489) {
 		MIPI_OUTP(base + 0x000c, status);
-		pr_err("%s: status=%x\n", __func__, status);
+		//pr_err("%s: status=%x\n", __func__, status);
 		if (status & 0x0080)  /* CMD_DMA_FIFO_UNDERFLOW */
 			dsi_send_events(ctrl, DSI_EV_MDP_FIFO_UNDERFLOW);
 		}
@@ -1738,7 +1738,7 @@ irqreturn_t mdss_dsi_isr(int irq, void *ptr)
 #if defined (CONFIG_FB_MSM_MDSS_DSI_DBG)
 	xlog(__func__, ctrl->ndx, ctrl->mdp_busy, isr, 0, 0, 0x97);
 #endif
-		pr_err("%s: isr[%d]=%x %x", __func__, ctrl->ndx, isr, (int)DSI_INTR_ERROR);
+	//	pr_err("%s: isr[%d]=%x %x", __func__, ctrl->ndx, isr, (int)DSI_INTR_ERROR);
 		mdss_dsi_error(ctrl);
 	}
 

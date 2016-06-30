@@ -295,4 +295,8 @@ int mdss_fb_register_mdp_instance(struct msm_mdp_interface *mdp);
 void mdss_negative_color(int is_negative_on);
 #endif
 int mdss_fb_dcm(struct msm_fb_data_type *mfd, int req_state);
+int mdss_fb_blank_unblank(struct msm_fb_data_type *mfd, int blank_mode);
+int mdss_fb_blank_blank(struct msm_fb_data_type *mfd, int blank_mode);
+
+
 #endif /* MDSS_FB_H */

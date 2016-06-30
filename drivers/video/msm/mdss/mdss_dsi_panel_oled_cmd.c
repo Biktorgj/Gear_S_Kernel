@@ -39,14 +39,6 @@
 * twrp */
 extern int boot_mode_recovery;
 
-
-
-
-
-
-
-
-
 #if defined(CONFIG_ESD_ERR_FG_RECOVERY)
 struct delayed_work panel_check;
 static struct class *esd_class;
@@ -70,17 +62,14 @@ enum {
 DEFINE_LED_TRIGGER(bl_led_trigger);
 static struct mdss_samsung_driver_data msd;
 static void panel_enter_hbm_mode(void);
-
+static int mdss_dsi_panel_set_brightness(struct backlight_device *bd);
 /* Global ALPM states */
 #define DISPLAY_ALPM_MODES
 
 #ifdef DISPLAY_ALPM_MODES
 
-u8 panel_previous_alpm_mode;
-u8 panel_actual_alpm_mode;
-
-
-
+static u8 panel_previous_alpm_mode;
+static u8 panel_actual_alpm_mode;
 
 
 static void panel_alpm_on(unsigned int enable);
@@ -89,8 +78,6 @@ static void alpm_store(	struct mdss_panel_info *pinfo, u8 mode);
 #endif
 
 /* Dummy function */
-
-
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -171,12 +158,9 @@ void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	if (pinfo->alpm_event) {
 		printk("oled: Panel Reset: Alpm Event is true\n");
 
-		if (enable && pinfo->alpm_event(CHECK_PREVIOUS_STATUS))
+		if (pinfo->alpm_event(CHECK_CURRENT_STATUS))
 			return;
-		else if (!enable && pinfo->alpm_event(CHECK_CURRENT_STATUS)) {
-			pinfo->alpm_event(STORE_CURRENT_STATUS);
-			return;
-		}
+
 	printk("oled: [ALPM_DEBUG] %s: Panel reset, enable : %d\n", __func__, enable);
 #endif
 
@@ -454,8 +438,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
 	struct mdss_panel_info *pinfo = NULL;
-
-
+	struct backlight_device *bd = msd.bd;
 	msd.mfd = (struct msm_fb_data_type *)registered_fb[0]->par;
 	printk ("oled: Display panel power up started!\n");
 	if (pdata == NULL) {
@@ -472,63 +455,18 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	/* ALPM rework */
 	// If alpm was off and has been enabled...
 
-
-
-	if (pinfo->alpm_event){
-		printk("oled: Panel ON, Alpm_Event is true\n");
-
-		if (!pinfo->alpm_event(CHECK_PREVIOUS_STATUS)){
-			printk ("oled: Panel wasn't in ALPM mode!\n");
-			mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
-			}
-		else{
-			printk("oled: check_previous_status was 1\n");
-			}
-	}
-	else{
-		printk ("oled: No alpm event, turn it on anyway\n");
+	if (!pinfo->alpm_event(CHECK_CURRENT_STATUS)){
+		printk ("oled: Panel wasn't in ALPM mode!\n");
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
+	}else{
+		printk("oled: ALPM was ON, skipping poweron\n");
+		goto end;
 	}
+
 #else /* If ALPM is not used, turn on the lcd */
 	mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
 #endif
 	msd.mfd->resume_state = MIPI_RESUME_STATE;
-
-
-
-
-
-
-
-
-
-/* ALPM Mode Change */
-	if (pinfo->alpm_event) {
-		printk("oled: Panel On, ALPM Enable hook, Alpm_Event is true\n");
-
-		if (!pinfo->alpm_event(CHECK_PREVIOUS_STATUS) && pinfo->alpm_event(CHECK_CURRENT_STATUS)) {
-
-			/* Turn On ALPM Mode */
-			panel_alpm_on(1);
-			pinfo->alpm_event(STORE_CURRENT_STATUS);
-			pr_info("oled: [ALPM_DEBUG] %s: Send ALPM mode on cmds\n", __func__);
-		} else if (!pinfo->alpm_event(CHECK_CURRENT_STATUS) && pinfo->alpm_event(CHECK_PREVIOUS_STATUS)) {
-
-			/* Turn Off ALPM Mode */
-			panel_alpm_on(0);
-
-
-			pinfo->alpm_event(CLEAR_MODE_STATUS);
-			pr_info("oled: [ALPM_DEBUG] %s: Send ALPM off cmds\n", __func__);
-		}
-	}
-
-
-	/*if (ctrl->on_cmds.cmd_cnt){
-		printk ("oled: send powerup commands\n");
-		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
-		}*/
-
 
 	if (msd.boot_power_on) {
 		printk("oled: Boot power up!\n");
@@ -551,18 +489,14 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 if (boot_mode_recovery){
 		printk ("oled: We are in recovery mode, HBM mode please\n");
 		// If we're in recovery, set the screen in HBM Mode
-		panel_enter_hbm_mode();
+		bd->props.brightness = 95;
+		//ret = mdss_dsi_panel_set_brightness(bd);
+		printk ("oled: Recovery brightness set to %d\n", bd->props.brightness);
 		}
 else
 	printk ("oled: We ain't in recovery mode!\n");
 
-
-
-
-
-
-
-
+end:
 	pr_info("%s Panel power up completed.\n", __func__);
 
 	return 0;
@@ -585,47 +519,15 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata, panel_data);
 
 	pinfo = &(ctrl->panel_data.panel_info);
-	printk ("oled: ENTERING TEST %i\n", msd.mfd->blank_mode);
-	if (msd.mfd->blank_mode == FB_BLANK_VSYNC_SUSPEND || msd.mfd->blank_mode == FB_BLANK_NORMAL)
-		{
-		printk ("oled: Set Power: BLANK NORMAL -assuming ALPM ON!\n");
-		if (!pinfo->alpm_event(CHECK_CURRENT_STATUS)){
-			pinfo->alpm_event(ALPM_MODE_ON);
-			panel_alpm_on(1); // ALPM ON
-			}
-	} 
-	printk ("oled: FINISHED TEST\n");
 	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_CURRENT_STATUS)){
 		pr_info("oled: [ALPM_DEBUG] %s: Not sending Panel Off cmds\n", __func__);
 		goto end;
-		//enable_irq_wake(msd.esd_irq);
-		//enable_irq_wake(msd.err_irq);
 	}else{
 		printk("oled: Sending display off commands\n");
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
 	}
 
 	pr_info("oled: Shutting down the display \n");
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 	msd.mfd->resume_state = MIPI_SUSPEND_STATE;
 
 	#if defined(CONFIG_ESD_ERR_FG_RECOVERY)
@@ -638,18 +540,6 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	gpio_free(msd.esd_det);
 	#endif
 end:
-
-
-
-
-
-
-
-
-
-
-
-
 
 	pr_info("oled: %s Panel power off finished.\n", __func__);
 	return 0;
@@ -1433,97 +1323,37 @@ static int mdss_dsi_panel_set_power(struct lcd_device *ld, int power)
 	pinfo = &(ctrl_pdata->panel_data.panel_info);
 	
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 	if (msdd->power == power) {
 		printk ("oled: Set Power: Power mode is the same as it was before\n");
-
-
-
 		//ret = -EINVAL;
 		return -EINVAL;
 		}
 
-
-
-
-
 	switch (power) {
 		case FB_BLANK_UNBLANK:
 			printk("oled: Set Power: UNBLANK\n");
-			if (pinfo->alpm_event(CHECK_CURRENT_STATUS))
-				panel_alpm_on(0);
 			msdd->power = power;
 			break;
+			
 		case FB_BLANK_VSYNC_SUSPEND:
-
-
-
-
-
+			printk ("oled: Set Power: BLANK NORMAL\n");
+			msdd->power = power;
+			break;
 
 		case FB_BLANK_NORMAL:
-			printk ("oled: Set Power: BLANK NORMAL -assuming ALPM ON!\n");
-			if (!pinfo->alpm_event(CHECK_CURRENT_STATUS)){
-				pinfo->alpm_event(ALPM_MODE_ON);
-				panel_alpm_on(1); // ALPM ON
-				}
+			printk("oled: Set Power: BLANK Powerdown\n");
 			msdd->power = power;
-
-
-
-
-
-
-
-
-
-
 			break;
+			
 		case FB_BLANK_HSYNC_SUSPEND:
 		case FB_BLANK_POWERDOWN:
 			printk("oled: Set Power: BLANK Powerdown\n");
-
-
-
-
-
-
-
-
-
-
-
-
 			msdd->power = power;
 			break;
 		default:
 			printk ("oled: Set Power: Default case hit\n");
 			break;
 		} // switch Power End
-
-
-
-
-
-
-
-
 
 	return 0;
 }
@@ -1629,31 +1459,13 @@ static int mdss_dsi_panel_set_brightness(struct backlight_device *bd)
 	if (pinfo->alpm_event(CHECK_CURRENT_STATUS)){
 		printk ("oled: ALPM enabled, skip brightness setting\n");
 		return 0;
-
-
-
-
-
 	}
-	/*if (msd.alpm_mode) {
-		pr_info("brightness control is not supported under alpm mode\n");
-		ret = 0;
-		goto out;
-	}*/
 
-	/*ret = mdss_dsi_runtime_active(ctrl_pdata, true, __func__);
-	if (ret){
-		pr_info("%s:failed to runtime_active:ret[%d]\n", __func__, ret);
-		mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
-		goto out;
-	}*/
 
 	if (msd.hbm_on)
 		panel_enter_hbm_mode();
 	else
 		panel_update_brightness(bd, level);
-
-	//mdss_dsi_runtime_active(ctrl_pdata, false, __func__);
 
 out:
 	return ret;
@@ -1854,10 +1666,12 @@ u8 panel_alpm_handler(u8 flag)
 		case ALPM_MODE_ON:
 			panel_actual_alpm_mode = ALPM_MODE_ON;
 			printk ("oled: ALPM_HANDLE : ALPM MODE ON\n");
+			panel_alpm_on(1);
 			break;
 		case NORMAL_MODE_ON:
 			panel_actual_alpm_mode = MODE_OFF;
 			printk ("oled: ALPM_HANDLE : NORMAL MODE ON\n");
+			panel_alpm_on(0);
 			break;
 		case MODE_OFF:
 			panel_actual_alpm_mode = MODE_OFF;
@@ -1896,16 +1710,6 @@ static void alpm_store(	struct mdss_panel_info *pinfo, u8 mode)
 
 	pinfo->alpm_event(mode);
 
-
-
-
-
-
-
-
-
-
-
 }
 
 static void panel_alpm_on(unsigned int enable)
@@ -1915,9 +1719,6 @@ static void panel_alpm_on(unsigned int enable)
 	struct mdss_panel_info *pinfo = NULL;
 
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,	panel_data);
-
-
-
 
 	pinfo = &(ctrl_pdata->panel_data.panel_info);
 
@@ -1937,12 +1738,6 @@ static void panel_alpm_on(unsigned int enable)
 			printk ("oled: Here I am, screaming in despair, trying to know \n");
 			printk ("oled: Why the fuck I am being called. \n");
 		} // end of msd.ldi_id
-
-
-
-
-
-
 		// Turn it on and fuck it.
 		mdss_dsi_panel_cmds_send(ctrl_pdata, &msd.alpm_on_cmds);
 		pr_info("oled: %s: ALPM ON.\n", __func__);
@@ -1954,10 +1749,6 @@ static void panel_alpm_on(unsigned int enable)
 		pr_info("oled: %s: ALPM OFF.\n", __func__);
 		pinfo->alpm_event(CLEAR_MODE_STATUS);
 	}
-
-
-
-
 
 	return;
 }
@@ -2003,48 +1794,27 @@ static ssize_t panel_alpm_store(struct device *dev,
 	sscanf(buf, "%d" , &mode);
 	pr_info("oled: [ALPM_DEBUG] %s: mode : %d,\n",
 			__func__, mode);
-
-if (mode == ALPM_MODE_ON) {
-	alpm_store(pinfo, mode); // store current mode
+			
 	/* If ALPM was OFF and it is now ON, turn on
-	ALPM, otherwise, do nothing */
-
-
-
-	if (!pinfo->alpm_event(CHECK_PREVIOUS_STATUS) //check!
-		&& pinfo->alpm_event(CHECK_CURRENT_STATUS)) {
-			/* Turn On ALPM Mode */
+		ALPM, otherwise, do nothing */
+	if (mode == ALPM_MODE_ON) {
+		if (!pinfo->alpm_event(CHECK_CURRENT_STATUS)){
+			// If ALPM was off, store the new mode and turn it on
+			alpm_store(pinfo, mode); // store current mode
 			pinfo->alpm_event(ALPM_MODE_ON);
-
-			panel_alpm_on(1);
-			pr_info("oled: [ALPM_DEBUG] %s: Send ALPM mode on cmds\n", __func__);
+			printk ("oled: ALPM Mode Enabled Via alpm_store\n");
 			}
 		}
-/* If ALPM was ON and now it's requested OFF, turn it off,
-otherwise, do nothing */
-
-
-else if (mode == MODE_OFF) {
-	alpm_store(pinfo, mode); // Store new mode
-
-	if (pinfo->alpm_event) { // check check check
-		if (pinfo->alpm_event(CHECK_PREVIOUS_STATUS) == ALPM_MODE_ON) {
-				panel_alpm_on(0);
-				pinfo->alpm_event(NORMAL_MODE_ON);
-
-				pr_info("[ALPM_DEBUG] %s: Send ALPM off cmds\n", __func__);
+	/* If ALPM was ON and now it's requested OFF, turn it off,
+		otherwise, do nothing */
+	else if (mode == MODE_OFF){
+		if (pinfo->alpm_event(CHECK_CURRENT_STATUS)){
+			alpm_store(pinfo, mode);
+			pinfo->alpm_event(NORMAL_MODE_ON);
+			printk("oled: ALPM Mode disabled Via alpm_store\n");
 			}
-		} // if pinfo->alpm_event
-	} // else if mode OFF
-
-
-
-
-
-
-
+		}
 	return size;
-
 }
 #endif
 /* End of ALPM Event functions */

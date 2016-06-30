@@ -326,63 +326,6 @@ void report_game_rot_data(struct ssp_data *data, struct sensor_value *grotdata)
 }
 #endif
 
-
-#ifdef IM_TESTING_THIS_FUCKER
-void report_step_det_data(struct ssp_data *data,
-		struct sensor_value *stepdet_data)
-{
-	data->buf[STEP_DETECTOR].step_det = stepdet_data->step_det;
-	input_report_rel(data->sig_motion_input_dev, REL_MISC, data->buf[STEP_DETECTOR].step_det);
-	input_sync(data->sig_motion_input_dev);
-	// this would work with IIOssp_push_1bytes_buffer(data->step_det_indio_dev,stepdet_data->timestamp, &stepdet_data->step_det);
-	
-}
-
-void report_step_cnt_data(struct ssp_data *data,
-	struct sensor_value *sig_motion_data)
-{
-	data->buf[STEP_COUNTER].step_diff = sig_motion_data->step_diff;
-
-	data->step_count_total += data->buf[STEP_COUNTER].step_diff;
-
-	input_report_rel(data->step_cnt_input_dev, REL_MISC,
-		data->step_count_total + 1);
-	input_sync(data->step_cnt_input_dev);
-}
-void report_sig_motion_data(struct ssp_data *data,
-	struct sensor_value *sig_motion_data)
-{
-	data->buf[SIG_MOTION_SENSOR].sig_motion = sig_motion_data->sig_motion;
-
-	input_report_rel(data->sig_motion_input_dev, REL_MISC,
-		data->buf[SIG_MOTION_SENSOR].sig_motion);
-	input_sync(data->sig_motion_input_dev);
-}
-
-void report_tilt_wake_data(struct ssp_data *data, struct sensor_value *tiltdata)
-{
-	data->buf[TILT_MOTION].x = tiltdata->x;
-	data->buf[TILT_MOTION].y = tiltdata->y;
-	data->buf[TILT_MOTION].z = tiltdata->z;
-
-	input_report_rel(data->tilt_wake_input_dev, REL_X,
-		data->buf[TILT_MOTION].x >= 0 ?
-		(data->buf[TILT_MOTION].x + 1) :
-		data->buf[TILT_MOTION].x);
-	input_report_rel(data->tilt_wake_input_dev, REL_Y,
-		data->buf[TILT_MOTION].y >= 0 ?
-		(data->buf[TILT_MOTION].y + 1) :
-		data->buf[TILT_MOTION].y);
-	input_report_rel(data->tilt_wake_input_dev, REL_Z,
-		data->buf[TILT_MOTION].z >= 0 ?
-		(data->buf[TILT_MOTION].z + 1) :
-		data->buf[TILT_MOTION].z);
-	input_sync(data->tilt_wake_input_dev);
-	wake_lock_timeout(&data->ssp_wake_lock, 3 * HZ);
-}
-#endif
-/* THIS NEEDS FIXING, THANK YOUUUU */
-
 #ifdef CONFIG_SENSORS_SSP_ADPD142
 void report_hrm_raw_data(struct ssp_data *data, struct sensor_value *hrmdata)
 {
@@ -559,15 +502,6 @@ int initialize_event_symlink(struct ssp_data *data)
 		goto iRet_uv_sysfs_create_link;
 #endif
 
-#ifdef IM_TESTING_THIS_FUCKER
-	iRet = sensors_create_symlink(data->sig_motion_input_dev);
-	if (iRet < 0)
-		goto iRet_sig_motion_sysfs_create_link;
-
-	iRet = sensors_create_symlink(data->step_cnt_input_dev);
-	if (iRet < 0)
-		goto iRet_step_cnt_sysfs_create_link;
-#endif
 	return SUCCESS;
 
 #ifdef CONFIG_SENSORS_SSP_UVIS25
@@ -602,12 +536,6 @@ iRet_mag_sysfs_create_link:
 	sensors_remove_symlink(data->gyro_input_dev);
 iRet_gyro_sysfs_create_link:
 	sensors_remove_symlink(data->acc_input_dev);
-#ifdef IM_TESTING_THIS_FUCKER
-iRet_step_cnt_sysfs_create_link:
-	sensors_remove_symlink(data->uncalib_gyro_input_dev);
-iRet_sig_motion_sysfs_create_link:
-	sensors_remove_symlink(data->uncal_mag_input_dev);
-#endif
 iRet_acc_sysfs_create_link:
 	pr_err("[SSP]: %s - could not create event symlink\n", __func__);
 	return FAIL;
@@ -637,11 +565,7 @@ void remove_event_symlink(struct ssp_data *data)
 #ifdef CONFIG_SENSORS_SSP_UVIS25
 	sensors_remove_symlink(data->uv_input_dev);
 #endif
-#ifdef IM_TESTING_THIS_FUCKER
-	sensors_remove_symlink(data->step_cnt_input_dev);
-	sensors_remove_symlink(data->sig_motion_input_dev);
-#endif
-	}
+}
 
 int initialize_input_dev(struct ssp_data *data)
 {
@@ -887,48 +811,9 @@ int initialize_input_dev(struct ssp_data *data)
 	}
 	input_set_drvdata(data->uv_input_dev, data);
 #endif
-#ifdef IM_TESTING_THIS_FUCKER
- /* Here I need to create the symlinks at sysfs to make the step counter show up as an input device */
- /* Question is... what do we use to report? EV_REL? EV_ABS? */
- /* DONT FORGET THE TILT TO WAKE SENSOR */
- // SIG MOTION - STEP_DETECT
- 	data->sig_motion_input_dev = input_allocate_device();
-	if (data->sig_motion_input_dev == NULL)
-		goto err_initialize_sig_motion_input_dev;
 
-	data->sig_motion_input_dev->name = "sig_motion";
-	input_set_capability(data->sig_motion_input_dev, EV_REL, REL_MISC);
-
-	iRet = input_register_device(data->sig_motion_input_dev);
-	if (iRet < 0) {
-		input_free_device(data->sig_motion_input_dev);
-		goto err_initialize_sig_motion_input_dev;
-	}
-	input_set_drvdata(data->sig_motion_input_dev, data);
-	
-	// STEP COUNTER
-	data->step_cnt_input_dev = input_allocate_device();
-	if (data->step_cnt_input_dev == NULL)
-		goto err_initialize_step_cnt_input_dev;
-
-	data->step_cnt_input_dev->name = "step_counter";
-	input_set_capability(data->step_cnt_input_dev, EV_REL, REL_MISC);
-
-	iRet = input_register_device(data->step_cnt_input_dev);
-	if (iRet < 0) {
-		input_free_device(data->step_cnt_input_dev);
-		goto err_initialize_step_cnt_input_dev;
-	}
-	input_set_drvdata(data->step_cnt_input_dev, data);
-#endif
 	return SUCCESS;
 
-#ifdef IM_TESTING_THIS_FUCKER
-err_initialize_step_cnt_input_dev:
-	pr_err("[SSP]: %s - Could not allocate step counter sensor device\n", __func__);
-err_initialize_sig_motion_input_dev:
-	pr_err("[SSP]: %s - Could not allocate significant motion sensor device\n", __func__);
-#endif 
 #ifdef CONFIG_SENSORS_SSP_UVIS25
 err_initialize_uv_input_dev:
 	pr_err("[SSP]: %s - could not allocate uv input device\n", __func__);
@@ -978,9 +863,6 @@ err_initialize_gyro_input_dev:
 	input_unregister_device(data->acc_input_dev);
 err_initialize_acc_input_dev:
 	pr_err("[SSP]: %s - could not allocate acc input device\n", __func__);
-#ifdef IM_TESTING_THIS_FUCKER
-/* Here we remove the symlink in case there's an error */
-#endif
 	return ERROR;
 }
 

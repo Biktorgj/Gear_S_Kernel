@@ -403,6 +403,7 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata)
 	}
 
 
+
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
@@ -412,6 +413,7 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata)
 
 	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_CURRENT_STATUS))
 		mipi_ulps_mode(ctrl_pdata, 1);
+
 	if (!pdata->panel_info.panel_power_on) {
 		pr_warn("%s:%d Panel already off.\n", __func__, __LINE__);
 		return -EPERM;
@@ -535,6 +537,9 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 
 	pdata->panel_info.panel_power_on = 1;
 
+
+
+
 	ret = mdss_dsi_enable_bus_clocks(ctrl_pdata);
 	if (ret) {
 		pr_err("%s: failed to enable bus clocks. rc=%d\n", __func__,
@@ -636,6 +641,9 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 
 	if (pdata->panel_info.mipi.init_delay)
 		usleep(pdata->panel_info.mipi.init_delay);
+
+
+
 
 
 
@@ -756,6 +764,7 @@ int mdss_dsi_cont_splash_on(struct mdss_panel_data *pdata)
 		}
 	}
 
+
 	pr_debug("%s-:End\n", __func__);
 	return ret;
 }
@@ -874,7 +883,7 @@ static int mdss_dsi_event_handler(struct mdss_panel_data *pdata,
 	switch (event) {
 	case MDSS_EVENT_UNBLANK:
 		rc = mdss_dsi_on(pdata);
-        	mdss_dsi_op_mode_config(pdata->panel_info.mipi.mode,pdata);
+        mdss_dsi_op_mode_config(pdata->panel_info.mipi.mode,pdata);
 		if (ctrl_pdata->dsi_on_state == DSI_LP_MODE)
 			rc = mdss_dsi_unblank(pdata);
 		break;
@@ -1482,6 +1491,8 @@ data = of_get_property(ctrl_pdev->dev.of_node,
 				gpio_free(ctrl_pdata->disp_en_gpio);
 				return -ENODEV;
 			}
+
+
 
 
 

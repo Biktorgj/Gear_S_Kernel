@@ -105,11 +105,10 @@ static int mdss_fb_pan_idle(struct msm_fb_data_type *mfd);
 static int mdss_fb_send_panel_event(struct msm_fb_data_type *mfd,
 					int event, void *arg);
 
-#if defined (CONFIG_FB_MSM_MIPI_SAMSUNG_TFT_VIDEO_WQXGA_PT_PANEL)|| \
-	defined (CONFIG_FB_MSM8x26_MDSS_CHECK_LCD_CONNECTION)
-int get_lcd_attached(void);
-#endif
-
+static int presentBlankMode;
+static int previousBlankMode;
+static int isSuspending;
+int mdss_fb_manage_panel_alpm(struct msm_fb_data_type *mfd, int blank_mode);
 void mdss_fb_no_update_notify_timer_cb(unsigned long data)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)data;
@@ -697,8 +696,8 @@ static int mdss_fb_suspend_sub(struct msm_fb_data_type *mfd)
 	if ((!mfd) || (mfd->key != MFD_KEY))
 		return 0;
 
-	pr_debug("mdss_fb suspend index=%d\n", mfd->index);
-
+	printk("mdss_fb suspend index=%d\n", mfd->index);
+	isSuspending = 1;
 	mdss_fb_pan_idle(mfd);
 	ret = mdss_fb_send_panel_event(mfd, MDSS_EVENT_SUSPEND, NULL);
 	if (ret) {
@@ -709,20 +708,21 @@ static int mdss_fb_suspend_sub(struct msm_fb_data_type *mfd)
 	mfd->suspend.op_enable = mfd->op_enable;
 	mfd->suspend.panel_power_on = mfd->panel_power_on;
 
-
-
-
 	if (mfd->op_enable) {
-		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, mfd->fbi,
-				mfd->suspend.op_enable);
+		printk ("mdss_fb suspend: blanking into VSYNC\n");
+		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN
+							/*FB_BLANK_VSYNC_SUSPEND*/, mfd->fbi,
+							mfd->suspend.op_enable);
+
 		if (ret) {
+			isSuspending = 0;
 			pr_warn("can't turn off display!\n");
 			return ret;
 		}
 		mfd->op_enable = false;
 		fb_set_suspend(mfd->fbi, FBINFO_STATE_SUSPENDED);
 	}
-
+	isSuspending = 0;
 	return 0;
 }
 
@@ -952,137 +952,183 @@ void mdss_fb_update_backlight(struct msm_fb_data_type *mfd)
 					mfd->unset_bl_level, mfd->bl_updated);
 	}
 }
+/* FB BLANK FUNCTIONS */
+int mdss_fb_manage_panel_alpm(struct msm_fb_data_type *mfd, int blank_mode)
+{
+	int ret = 0;
+	int alpmEvent = -1;
+	if (!isSuspending)
+		alpmEvent = mfd->panel_info->alpm_event(CHECK_CURRENT_STATUS);
+	
+	printk ("FB ALPM Manager: *start* \n");
+	printk ("Status Report: Blank Mode: %i \n Actual Saved Mode: %i \n Previous Mode: %i \
+			 Is Suspending: %i \n ALPM Mode %i \n", blank_mode, presentBlankMode, previousBlankMode,
+			 isSuspending, alpmEvent);
+	switch (blank_mode)
+		{
+		case FB_BLANK_VSYNC_SUSPEND:
+			if (isSuspending == 0){
+				printk ("FB Blank: Enabling ALPM Mode\n");
+				ret = mfd->panel_info->alpm_event(ALPM_MODE_ON);
+				ret = mfd->panel_info->alpm_event(STORE_CURRENT_STATUS);
+			}
+			break;
+		case FB_BLANK_UNBLANK:
+			if (isSuspending == 0){
+				if (previousBlankMode == FB_BLANK_VSYNC_SUSPEND || previousBlankMode == FB_BLANK_NORMAL) {
+					printk ("FB: Disabling ALPM mode\n");
+					ret = mfd->panel_info->alpm_event(NORMAL_MODE_ON);
+					ret = mfd->panel_info->alpm_event(STORE_CURRENT_STATUS);
+				}
+			}
+			break;
+		default:
+			printk ("FB ALPM Manager: Not doing anything. Blank Mode is %d", blank_mode);
+			break;
+		}
+	printk ("FB ALPM Manager: *end* \n");
+	return ret;
+}
+int mdss_fb_blank_blank(struct msm_fb_data_type *mfd, int blank_mode)
+	{
+	int curr_pwr_state;
+	int ret = 0;
+	mutex_lock(&mfd->power_state);
+    mutex_lock(&mfd->ctx_lock);
+	printk ("FB Blank Blank: START\n");
+	if (mfd->panel_power_on && mfd->mdp.off_fnc) {
+		
+		printk("FB Blank Blank: Running!\n");
+		mutex_lock(&mfd->update.lock);
+		mfd->update.type = NOTIFY_TYPE_SUSPEND;
+		mutex_unlock(&mfd->update.lock);
+		del_timer(&mfd->no_update.timer);
+		mfd->no_update.value = NOTIFY_TYPE_SUSPEND;
+		complete(&mfd->no_update.comp);
 
+		mfd->op_enable = false;
+		curr_pwr_state = mfd->panel_power_on;
+		switch (blank_mode){
+			case FB_BLANK_VSYNC_SUSPEND:
+				printk ("FB Blank Blank: Flag is LP\n");
+				mfd->panel_power_on = true;
+				break;
+			case FB_BLANK_POWERDOWN:
+			case FB_BLANK_HSYNC_SUSPEND:
+				printk ("FB Blank Blank: Flag is POWERDOWN\n");
+				mfd->panel_power_on = false;
+				break;
+			}
+		mfd->bl_updated = 0;
+		ret = mfd->mdp.off_fnc(mfd);
+		if (ret)
+			mfd->panel_power_on = curr_pwr_state;
+		else
+			mdss_fb_release_fences(mfd);
+		mfd->op_enable = true;
+		complete(&mfd->power_off_comp);
+		fist_commit_flag = 1;
+		}
+		
+	// Keep track of each state	
+	previousBlankMode = presentBlankMode;
+	presentBlankMode = blank_mode;
+	mutex_unlock(&mfd->ctx_lock);
+	mutex_unlock(&mfd->power_state);
+	printk ("FB Blank Blank: END\n");
+	
+	return ret;
+}
+
+int mdss_fb_blank_unblank(struct msm_fb_data_type *mfd, int blank_mode)
+	{
+	int ret = 0;
+	mutex_lock(&mfd->power_state);
+    mutex_lock(&mfd->ctx_lock);
+	printk ("FB Unblank: START\n");
+	if (!mfd->panel_power_on && mfd->mdp.on_fnc) {
+		
+		printk ("FB Unblank: Running!\n");
+	#if defined(CONFIG_CLK_TUNING)
+		load_clk_tuning_file();
+	#endif
+		ret = mfd->mdp.on_fnc(mfd);
+		if (ret == 0) {
+			mfd->panel_power_on = true;
+			mfd->panel_info->panel_dead = false;
+		}
+		mutex_lock(&mfd->update.lock);
+		mfd->update.type = NOTIFY_TYPE_UPDATE;
+		mutex_unlock(&mfd->update.lock);
+		/* Start the work thread to signal idle time */
+		if (mfd->idle_time)
+			schedule_delayed_work(&mfd->idle_notify_work,
+				msecs_to_jiffies(mfd->idle_time));
+		}
+		
+
+	// Keep track of the blank state
+	previousBlankMode = presentBlankMode;
+	presentBlankMode = blank_mode;
+	mutex_unlock(&mfd->ctx_lock);
+	mutex_unlock(&mfd->power_state);
+	printk ("FB Unblank: END\n");
+	
+	return ret;
+}
 static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			     int op_enable)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 	int ret = 0;
-
-	pr_info("FB_NUM:%d, MDSS_FB_%s ++ \n", mfd->panel_info->fb_num,
-			blank_mode? "BLANK": "UNBLANK");
-
-
 	if (!op_enable)
 		return -EPERM;
 
 	if (mfd->dcm_state == DCM_ENTER)
 		return -EPERM;
 
-	mfd->blank_mode = blank_mode;
-	mutex_lock(&mfd->power_state);
-        mutex_lock(&mfd->ctx_lock);
-	switch (blank_mode) {
-	case FB_BLANK_UNBLANK:
-		if (!mfd->panel_power_on && mfd->mdp.on_fnc) {
-#if defined(CONFIG_CLK_TUNING)
-			load_clk_tuning_file();
-#endif
-			ret = mfd->mdp.on_fnc(mfd);
-			if (ret == 0) {
-				mfd->panel_power_on = true;
-				mfd->panel_info->panel_dead = false;
-			}
-			mutex_lock(&mfd->update.lock);
-			mfd->update.type = NOTIFY_TYPE_UPDATE;
-			mutex_unlock(&mfd->update.lock);
-
-			/* Start the work thread to signal idle time */
-			if (mfd->idle_time)
-				schedule_delayed_work(&mfd->idle_notify_work,
-					msecs_to_jiffies(mfd->idle_time));
-		}
-		break;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-	case FB_BLANK_VSYNC_SUSPEND:
-	case FB_BLANK_HSYNC_SUSPEND:
-	case FB_BLANK_NORMAL:
-	case FB_BLANK_POWERDOWN:
-	default:
-
-		if (mfd->panel_power_on && mfd->mdp.off_fnc) {
-			int curr_pwr_state;
-
-			mutex_lock(&mfd->update.lock);
-			mfd->update.type = NOTIFY_TYPE_SUSPEND;
-			mutex_unlock(&mfd->update.lock);
-			del_timer(&mfd->no_update.timer);
-			mfd->no_update.value = NOTIFY_TYPE_SUSPEND;
-			complete(&mfd->no_update.comp);
-
-			mfd->op_enable = false;
-			curr_pwr_state = mfd->panel_power_on;
-			mfd->panel_power_on = false;
-			mfd->bl_updated = 0;
-
-			ret = mfd->mdp.off_fnc(mfd);
-			if (ret)
-				mfd->panel_power_on = curr_pwr_state;
-			else
-				mdss_fb_release_fences(mfd);
-			mfd->op_enable = true;
-			complete(&mfd->power_off_comp);
-
-			fist_commit_flag = 1;
-		}
-		break;
-	}
-        mutex_unlock(&mfd->ctx_lock);
-	mutex_unlock(&mfd->power_state);
+	pr_info("FB BlankSub begin: fb: %d \n BlankMode: %d \n PreviousBlank: %d \n",
+	mfd->panel_info->fb_num, blank_mode, previousBlankMode);
 	
-	pr_info("FB_NUM:%d, MDSS_FB_%s -- \n", mfd->panel_info->fb_num,
-			blank_mode ? "BLANK": "UNBLANK");
+	/*if (previousBlankMode == FB_BLANK_VSYNC_SUSPEND && blank_mode == FB_BLANK_VSYNC_SUSPEND){
+		printk ("FB Blank: FB Mode is the same as it was!\n");
+		return -EPERM;
+	}*/
+	mfd->blank_mode = blank_mode;
+	switch (blank_mode) {
+		case FB_BLANK_UNBLANK:
+			printk ("FB Blank: UNBLANK\n");
+			ret = mdss_fb_blank_unblank(mfd, blank_mode);
+			ret = mdss_fb_manage_panel_alpm(mfd, blank_mode);
+			break;
 
+		case FB_BLANK_NORMAL:
+			printk ("FB Blank: LPM Refresh\n");
+			ret = mdss_fb_blank_unblank(mfd, blank_mode);
+			break;
+
+		case FB_BLANK_VSYNC_SUSPEND:
+			printk ("FB Blank: ALPM Mode\n");
+			if (previousBlankMode == FB_BLANK_POWERDOWN){
+				printk ("FB Blank: Waking up to suspend\n"); 
+				ret = mdss_fb_blank_unblank(mfd, FB_BLANK_UNBLANK);
+				}
+			ret = mdss_fb_manage_panel_alpm(mfd, blank_mode);
+			printk ("FB Blank: Panel was in %i mode, blanking directly\n", blank_mode);
+			ret = mdss_fb_blank_blank(mfd, blank_mode);
+			break;
+		case FB_BLANK_POWERDOWN:
+		case FB_BLANK_HSYNC_SUSPEND:
+		default:
+			printk ("FB Blank: Requested Power Down \n");
+			ret = mdss_fb_blank_blank(mfd, blank_mode);
+			break;
+		}
 	/* Notify listeners */
 	sysfs_notify(&mfd->fbi->dev->kobj, NULL, "show_blank_event");
+
+	pr_info("FB BlankSub finish: fb: %d \n BlankMode: %d \n PreviousBlank: %d \n",
+	mfd->panel_info->fb_num, blank_mode, previousBlankMode);
 
 	return ret;
 }
@@ -1090,68 +1136,25 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 static int mdss_fb_blank(int blank_mode, struct fb_info *info)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
-#if defined(CONFIG_MACH_S3VE3G_EUR) && defined(CONFIG_ESD_ERR_FG_RECOVERY)
-	static int nblank_mode = FB_BLANK_UNBLANK;
-	static int final_state = -1;
-	int ret;
+	printk ("FB Blank is being called\n");
 
-	mutex_lock(&esd_lock);
-
-	printk("%s : nblank_mode[%d], blank_mode[%d], final_state[%d], esd_active[%d]\n", __func__, nblank_mode, blank_mode, final_state, info->esd_active);
-	if(info->esd_active) {
-		if(nblank_mode == FB_BLANK_POWERDOWN) {
-//			if(final_state == FB_BLANK_UNBLANK)
-//				goto NEXT_STEP1;
-//			final_state = blank_mode;
-			if(blank_mode == FB_BLANK_UNBLANK)
-				final_state = -1;
-			mutex_unlock(&esd_lock);
-			return 0;
-		} else if(nblank_mode == FB_BLANK_UNBLANK) {
-			if(final_state == FB_BLANK_POWERDOWN && blank_mode == FB_BLANK_POWERDOWN) {
-				nblank_mode = blank_mode;
-				mutex_unlock(&esd_lock);
-				return 0;
-			}
-
-			if(blank_mode == FB_BLANK_UNBLANK)
-				final_state = -1;
-			else if(blank_mode == FB_BLANK_POWERDOWN)
-				final_state = blank_mode;
-			goto NEXT_STEP2;
-		}
-	}
-
-//NEXT_STEP1:
-
-	if(blank_mode == FB_BLANK_UNBLANK || blank_mode == FB_BLANK_POWERDOWN) {
-		nblank_mode = blank_mode;
-//		final_state = -1;
-	}
-
-NEXT_STEP2:
-#endif
 	mdss_fb_pan_idle(mfd);
+
 	if (mfd->op_enable == 0) {
-		if (blank_mode == FB_BLANK_UNBLANK)
+		printk("FB Blank: Establishing power mode for suspend\n");
+		if (blank_mode == FB_BLANK_UNBLANK ||
+			/*blank_mode == FB_BLANK_VSYNC_SUSPEND || */
+			blank_mode == FB_BLANK_NORMAL) 
 			mfd->suspend.panel_power_on = true;
 		else
 			mfd->suspend.panel_power_on = false;
-
-#if defined(CONFIG_MACH_S3VE3G_EUR) && defined(CONFIG_ESD_ERR_FG_RECOVERY)
-		mutex_unlock(&esd_lock);
-#endif
+		printk ("FB Blank: Panel power set: %d", mfd->suspend.panel_power_on);
 		return 0;
 	}
-
-#if defined(CONFIG_MACH_S3VE3G_EUR) && defined(CONFIG_ESD_ERR_FG_RECOVERY)
-	ret = mdss_fb_blank_sub(blank_mode, info, mfd->op_enable);
-	mutex_unlock(&esd_lock);
-	return ret;
-#else
-	return mdss_fb_blank_sub(blank_mode, info, mfd->op_enable);
-#endif
+	return  mdss_fb_blank_sub(blank_mode, info, mfd->op_enable);
 }
+/* FB BLANK FUNCTIONS END */
+
 
 /*
  * Custom Framebuffer mmap() function for MSM driver.

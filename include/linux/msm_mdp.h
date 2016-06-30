@@ -136,6 +136,8 @@ enum {
 	MDP_XBGR_8888_TILE,	/* XBGR 8888 in tile format */
 	MDP_BGRX_8888_TILE,	/* BGRX 8888 in tile format */
 	MDP_YCBYCR_H2V1,  /* YCbYCr interleave */
+	MDP_RGB_565_TILE,	  /* RGB 565 in tile format */
+	MDP_BGR_565_TILE,	  /* BGR 565 in tile format */
 	MDP_IMGTYPE_LIMIT,
 	MDP_RGB_BORDERFILL,	/* border fill pipe */
 	MDP_FB_FORMAT = MDP_IMGTYPE2_START,    /* framebuffer format */
@@ -608,6 +610,7 @@ struct mdp_overlay {
 	uint32_t bg_color;
 	uint8_t horz_deci;
 	uint8_t vert_deci;
+	uint8_t priority;
 	struct mdp_overlay_pp_params overlay_pp_cfg;
 	struct mdp_scale_data scale;
 };

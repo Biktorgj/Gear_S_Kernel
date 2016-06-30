@@ -72,11 +72,11 @@ static struct snd_pcm_hardware msm_pcm_hardware = {
 	.channels_min =         1,
 	.channels_max =         2,
 	.buffer_bytes_max =     1024 * 1024,
-#ifdef CONFIG_SND_SOC_MSM_TIZEN_TUNE
-	.period_bytes_min = 32 * 1024,
-#else
+//#ifdef CONFIG_SND_SOC_MSM_TIZEN_TUNE
+//	.period_bytes_min = 32 * 1024,
+//#else
 	.period_bytes_min = 128 * 1024,
-#endif
+//#endif
 	.period_bytes_max =     256 * 1024,
 	.periods_min =          4,
 	.periods_max =          8,

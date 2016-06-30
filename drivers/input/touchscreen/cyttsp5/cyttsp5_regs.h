@@ -61,7 +61,7 @@ extern int boot_mode_lpm;
 #define SAMSUNG_FACTORY_TEST
 #define SAMSUNG_TSP_INFO
 #define SAMSUNG_TOUCH_MODE
-#define SAMSUNG_PALM_MOTION
+#define SAMSUNG_PALM_MOTION 1
 
 #define DEFAULT_REPORT_RATE		45
 

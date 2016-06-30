@@ -140,36 +140,6 @@ static void get_uv_sensordata(char *pchRcvDataFrame, int *iDataIdx,
 }
 #endif
 
-
-#ifdef IM_TESTING_THIS_FUCKER
-/*
-This _has_ to be wrong. iDataIndex overlaps with the UV sensor, so I will need
-to check the entire dataframe to actually see where the fuck the step counter 
-data is, so I can avoid getting it dismissed by the kernel module. WHAT THE ACTUAL
-FUCK SAMSUNG
-*/
-static void get_step_det_sensordata(char *pchRcvDataFrame, int *iDataIdx,
-	struct sensor_value *sensorsdata)
-{
-	memcpy(sensorsdata, pchRcvDataFrame + *iDataIdx, 1);
-	*iDataIdx += 1;
-}
-// Significant motion sensor, yayyy!
-static void get_sig_motion_sensordata(char *pchRcvDataFrame, int *iDataIdx,
-	struct sensor_value *sensorsdata)
-{
-	memcpy(sensorsdata, pchRcvDataFrame + *iDataIdx, 1);
-	*iDataIdx += 1;
-}
-
-static void get_step_cnt_sensordata(char *pchRcvDataFrame, int *iDataIdx,
-	struct sensor_value *sensorsdata)
-{
-	
-	memcpy(&sensorsdata->step_diff, pchRcvDataFrame + *iDataIdx, 4); 
-	*iDataIdx += 4;
-}
-#endif
 int handle_big_data(struct ssp_data *data, char *pchRcvDataFrame, int *pDataIdx) {
 	u8 bigType = 0;
 	struct ssp_big *big = kzalloc(sizeof(*big), GFP_KERNEL);
@@ -340,26 +310,28 @@ void initialize_function_pointer(struct ssp_data *data)
 #else
 	data->get_sensor_data[GAME_ROTATION_VECTOR] = get_dummy_sensordata;
 #endif
-	data->get_sensor_data[STEP_DETECTOR] = get_step_det_sensordata; // get_dummy_sensordata;
-	data->get_sensor_data[SIG_MOTION_SENSOR] = get_sig_motion_sensordata; // get_dummy_sensordata;
+	data->get_sensor_data[STEP_DETECTOR] = get_dummy_sensordata;
+	data->get_sensor_data[SIG_MOTION_SENSOR] = get_dummy_sensordata;
 	data->get_sensor_data[GYRO_UNCALIB_SENSOR] = get_uncalib_sensordata;
-	data->get_sensor_data[STEP_COUNTER] =get_step_cnt_sensordata; // get_dummy_sensordata;
+	data->get_sensor_data[STEP_COUNTER] = get_dummy_sensordata;
 #ifdef CONFIG_SENSORS_SSP_ADPD142
 		data->get_sensor_data[BIO_HRM_RAW] = get_hrm_raw_sensordata;
 		data->get_sensor_data[BIO_HRM_RAW_FAC] =
 			get_hrm_raw_fac_sensordata;
 		data->get_sensor_data[BIO_HRM_LIB] = get_hrm_lib_sensordata;
 #endif
-	data->get_sensor_data[TILT_MOTION] = get_3axis_sensordata; //get_dummy_sensordata;
+	data->get_sensor_data[TILT_MOTION] = get_dummy_sensordata;
 #ifdef CONFIG_SENSORS_SSP_UVIS25
 	data->get_sensor_data[UV_SENSOR] = get_uv_sensordata;
 #endif
 
 	data->report_sensor_data[ACCELEROMETER_SENSOR] = report_acc_data;
 	data->report_sensor_data[GYROSCOPE_SENSOR] = report_gyro_data;
-	data->report_sensor_data[GEOMAGNETIC_UNCALIB_SENSOR] = report_mag_uncaldata;
+	data->report_sensor_data[GEOMAGNETIC_UNCALIB_SENSOR] =
+		report_mag_uncaldata;
 	data->report_sensor_data[GEOMAGNETIC_RAW] = report_geomagnetic_raw_data;
-	data->report_sensor_data[GEOMAGNETIC_SENSOR] = report_mag_data;
+	data->report_sensor_data[GEOMAGNETIC_SENSOR] =
+		report_mag_data;
 #ifdef CONFIG_SENSORS_SSP_LPS25H
 	data->report_sensor_data[PRESSURE_SENSOR] = report_pressure_data;
 #else
@@ -381,16 +353,16 @@ void initialize_function_pointer(struct ssp_data *data)
 #else
 	data->report_sensor_data[GAME_ROTATION_VECTOR] = report_dummy_data;
 #endif
-	data->report_sensor_data[STEP_DETECTOR] = report_step_det_data; //report_dummy_data;
-	data->report_sensor_data[SIG_MOTION_SENSOR] = report_sig_motion_data; // report_dummy_data;
+	data->report_sensor_data[STEP_DETECTOR] = report_dummy_data;
+	data->report_sensor_data[SIG_MOTION_SENSOR] = report_dummy_data;
 	data->report_sensor_data[GYRO_UNCALIB_SENSOR] = report_uncalib_gyro_data;
-	data->report_sensor_data[STEP_COUNTER] = report_step_cnt_data; // report_dummy_data;
+	data->report_sensor_data[STEP_COUNTER] = report_dummy_data;
 #ifdef CONFIG_SENSORS_SSP_ADPD142
 	data->report_sensor_data[BIO_HRM_RAW] = report_hrm_raw_data;
 	data->report_sensor_data[BIO_HRM_RAW_FAC] = report_hrm_raw_fac_data;
 	data->report_sensor_data[BIO_HRM_LIB] = report_hrm_lib_data;
 #endif
-	data->report_sensor_data[TILT_MOTION] = report_tilt_wake_data; //report_dummy_data;
+	data->report_sensor_data[TILT_MOTION] = report_dummy_data;
 #ifdef CONFIG_SENSORS_SSP_UVIS25
 	data->report_sensor_data[UV_SENSOR] = report_uv_data;
 #endif
