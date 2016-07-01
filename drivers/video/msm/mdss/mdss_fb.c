@@ -967,18 +967,16 @@ int mdss_fb_manage_panel_alpm(struct msm_fb_data_type *mfd, int blank_mode)
 	switch (blank_mode)
 		{
 		case FB_BLANK_VSYNC_SUSPEND:
-			if (isSuspending == 0){
+			if (isSuspending == 0 && alpmEvent == 0){
 				printk ("FB Blank: Enabling ALPM Mode\n");
 				ret = mfd->panel_info->alpm_event(ALPM_MODE_ON);
-				ret = mfd->panel_info->alpm_event(STORE_CURRENT_STATUS);
 			}
 			break;
 		case FB_BLANK_UNBLANK:
-			if (isSuspending == 0){
-				if (previousBlankMode == FB_BLANK_VSYNC_SUSPEND || previousBlankMode == FB_BLANK_NORMAL) {
+			if (isSuspending == 0 && alpmEvent == 1){
+				if (alpmEvent) {
 					printk ("FB: Disabling ALPM mode\n");
-					ret = mfd->panel_info->alpm_event(NORMAL_MODE_ON);
-					ret = mfd->panel_info->alpm_event(STORE_CURRENT_STATUS);
+					ret = mfd->panel_info->alpm_event(MODE_OFF);
 				}
 			}
 			break;
@@ -1010,12 +1008,19 @@ int mdss_fb_blank_blank(struct msm_fb_data_type *mfd, int blank_mode)
 		curr_pwr_state = mfd->panel_power_on;
 		switch (blank_mode){
 			case FB_BLANK_VSYNC_SUSPEND:
-				printk ("FB Blank Blank: Flag is LP\n");
-				mfd->panel_power_on = true;
+				printk ("FB Blank Blank: Req: Vsync Suspend\n");
+				mfd->panel_power_on = false;
+				break;
+			case FB_BLANK_NORMAL:
+				printk ("FB Blank Blank: Req: Blank Normal \n");
+				mfd->panel_power_on = false;
 				break;
 			case FB_BLANK_POWERDOWN:
+				printk ("FB Blank Blank: Req: Powerdown \n");
+				mfd->panel_power_on = false;
+				break;
 			case FB_BLANK_HSYNC_SUSPEND:
-				printk ("FB Blank Blank: Flag is POWERDOWN\n");
+				printk ("FB Blank Blank: Req: HSync Suspend\n");
 				mfd->panel_power_on = false;
 				break;
 			}
@@ -1035,7 +1040,7 @@ int mdss_fb_blank_blank(struct msm_fb_data_type *mfd, int blank_mode)
 	presentBlankMode = blank_mode;
 	mutex_unlock(&mfd->ctx_lock);
 	mutex_unlock(&mfd->power_state);
-	printk ("FB Blank Blank: END\n");
+	printk ("FB Blank Blank: END. Power state: %d\n", mfd->panel_power_on);
 	
 	return ret;
 }
@@ -1072,7 +1077,7 @@ int mdss_fb_blank_unblank(struct msm_fb_data_type *mfd, int blank_mode)
 	presentBlankMode = blank_mode;
 	mutex_unlock(&mfd->ctx_lock);
 	mutex_unlock(&mfd->power_state);
-	printk ("FB Unblank: END\n");
+	printk ("FB Unblank: END. Power state: %d\n", mfd->panel_power_on);
 	
 	return ret;
 }
@@ -1098,21 +1103,34 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	switch (blank_mode) {
 		case FB_BLANK_UNBLANK:
 			printk ("FB Blank: UNBLANK\n");
-			ret = mdss_fb_blank_unblank(mfd, blank_mode);
+			if (previousBlankMode == FB_BLANK_NORMAL && presentBlankMode == FB_BLANK_VSYNC_SUSPEND){
+				ret = mdss_fb_manage_panel_alpm(mfd, blank_mode);
+				ret = mdss_fb_blank_blank(mfd, FB_BLANK_POWERDOWN);
+				previousBlankMode = FB_BLANK_HSYNC_SUSPEND;
+				presentBlankMode = FB_BLANK_VSYNC_SUSPEND
+			}
+				
+			
+			
+			// If I set the bits for MODE_OFF, the next time the panel wakes
+			// should trigger the ALPM Mode Off and reset the panel to a sane state
+			// Should is the hopeful word here
 			ret = mdss_fb_manage_panel_alpm(mfd, blank_mode);
+			ret = mdss_fb_blank_unblank(mfd, blank_mode);
 			break;
 
 		case FB_BLANK_NORMAL:
-			printk ("FB Blank: LPM Refresh\n");
+			printk ("FB Blank: BLANK NORMAL\n");
 			ret = mdss_fb_blank_unblank(mfd, blank_mode);
 			break;
 
 		case FB_BLANK_VSYNC_SUSPEND:
 			printk ("FB Blank: ALPM Mode\n");
-			if (previousBlankMode == FB_BLANK_POWERDOWN){
+			// This is fucking off with my blank states, so turn it off for now
+		/*	if (previousBlankMode == FB_BLANK_POWERDOWN){
 				printk ("FB Blank: Waking up to suspend\n"); 
 				ret = mdss_fb_blank_unblank(mfd, FB_BLANK_UNBLANK);
-				}
+				}*/
 			ret = mdss_fb_manage_panel_alpm(mfd, blank_mode);
 			printk ("FB Blank: Panel was in %i mode, blanking directly\n", blank_mode);
 			ret = mdss_fb_blank_blank(mfd, blank_mode);

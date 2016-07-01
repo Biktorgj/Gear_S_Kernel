@@ -351,6 +351,7 @@ static int mipi_ulps_mode(struct mdss_dsi_ctrl_pdata *ctrl_pdata,int enter)
 	}
 	else //exit from the mode
 	{
+		printk ("DSI: Turning off ULPS\n");
 		MIPI_OUTP(ctrl_pdata->ctrl_base + CTRL_OFFSET, dsi0LaneCtrlReg | ULPS_EXIT_BITS);
 
 		printk("[ALPM_DEBUG] exiting from the ulps mode\n");
@@ -506,9 +507,9 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 
 	pinfo = &pdata->panel_info;
 
-	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_PREVIOUS_STATUS))
+	if (pinfo->alpm_event && pinfo->alpm_event(CHECK_PREVIOUS_STATUS)){
 			mipi_ulps_mode(ctrl_pdata, 0);
-
+	}
 	if((pdata->panel_info.type == MIPI_CMD_PANEL) && (ctrl_pdata->ndx == DSI_CTRL_0)) {
 		ret = gpio_tlmm_config(GPIO_CFG(
 				ctrl_pdata->disp_te_gpio, 1,
