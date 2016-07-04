@@ -71,13 +71,6 @@ static u32 mdss_fb_pseudo_palette[16] = {
 	0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
 };
 
-#ifdef CONFIG_FB_MSM_CAMERA_CSC
-u8 csc_update = 1;
-#endif
-
-#if defined(CONFIG_MACH_S3VE3G_EUR) && defined(CONFIG_ESD_ERR_FG_RECOVERY)
-struct mutex esd_lock;
-#endif
 
 static struct msm_mdp_interface *mdp_instance;
 
@@ -107,7 +100,8 @@ static int mdss_fb_send_panel_event(struct msm_fb_data_type *mfd,
 
 static int presentBlankMode;
 static int previousBlankMode;
-static int isSuspending;
+static int isSuspending =0;
+static int globalALPMMode =0;
 int mdss_fb_manage_panel_alpm(struct msm_fb_data_type *mfd, int blank_mode);
 void mdss_fb_no_update_notify_timer_cb(unsigned long data)
 {
@@ -135,11 +129,19 @@ static int mdss_fb_notify_update(struct msm_fb_data_type *mfd,
 	if (notify > NOTIFY_UPDATE_POWER_OFF)
 		return -EINVAL;
 
-	if (notify == NOTIFY_UPDATE_START) {
+	if (mfd->update.is_suspend) {
+		to_user = NOTIFY_TYPE_SUSPEND;
+		mfd->update.is_suspend = 0;
+		ret = 1;
+	} else if (notify == NOTIFY_UPDATE_START) {
 		INIT_COMPLETION(mfd->update.comp);
 		ret = wait_for_completion_interruptible_timeout(
 						&mfd->update.comp, 4 * HZ);
 		to_user = (unsigned int)mfd->update.value;
+		if (mfd->update.type == NOTIFY_TYPE_SUSPEND) {
+			to_user = (unsigned int)mfd->update.type;
+			ret = 1;
+		}
 	} else if (notify == NOTIFY_UPDATE_STOP) {
 		INIT_COMPLETION(mfd->no_update.comp);
 		ret = wait_for_completion_interruptible_timeout(
@@ -193,63 +195,7 @@ static struct led_classdev backlight_led = {
 	.brightness_set = mdss_fb_set_bl_brightness,
 };
 
-#ifdef CONFIG_FB_MSM_CAMERA_CSC
-static ssize_t csc_read_cfg(struct device *dev,
-               struct device_attribute *attr, char *buf)
-{
-	ssize_t ret = 0;
 
-	ret = snprintf(buf, PAGE_SIZE, "%d\n", csc_update);
-	return ret;
-}
-
-static ssize_t csc_write_cfg(struct device *dev,
-               struct device_attribute *attr, const char *buf, size_t count)
-{
-	ssize_t ret = strnlen(buf, PAGE_SIZE);
-	int err;
-	int mode;
-
-	err =  kstrtoint(buf, 0, &mode);
-	if (err)
-	       return ret;
-
-	csc_update = !!(u8)mode;
-
-	pr_info("%s: csc ctrl set to %d \n", __func__, mode);
-
-	return ret;
-}
-
-static DEVICE_ATTR(csc_cfg, S_IRUGO | S_IWUSR, csc_read_cfg, csc_write_cfg);
-
-static struct attribute *csc_fs_attrs[] = {
-	&dev_attr_csc_cfg.attr,
-	NULL,
-};
-
-static struct attribute_group csc_fs_attr_group = {
-	.attrs = csc_fs_attrs,
-};
-
-int mdp4_reg_csc_fs(struct msm_fb_data_type *mfd)
-{
-	int ret = 0;
-	struct device *dev = mfd->fbi->dev;
-
-	ret = sysfs_create_group(&dev->kobj,
-		&csc_fs_attr_group);
-	if (ret) {
-		pr_err("%s: sysfs group creation failed, ret=%d\n",
-		       __func__, ret);
-		return ret;
-	}
-
-	kobject_uevent(&dev->kobj, KOBJ_ADD);
-	pr_info("%s: kobject_uevent(KOBJ_ADD)\n", __func__);
-	return ret;
-}
-#endif
 static ssize_t mdss_fb_get_type(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
@@ -305,6 +251,7 @@ static void mdss_fb_parse_dt_split(struct msm_fb_data_type *mfd)
 #else
 	coeff = 2;
 #endif
+
 
 	if (data[0] && data[1] &&
 			    (mfd->panel_info->xres * coeff == (data[0] + data[1]))) {
@@ -464,8 +411,7 @@ static ssize_t mdss_set_rgb(struct device *dev,
 static DEVICE_ATTR(msm_fb_type, S_IRUGO, mdss_fb_get_type, NULL);
 static DEVICE_ATTR(msm_fb_split, S_IRUGO, mdss_fb_get_split, NULL);
 static DEVICE_ATTR(show_blank_event, S_IRUGO, mdss_mdp_show_blank_event, NULL);
-static DEVICE_ATTR(idle_time, S_IRUGO | S_IWUSR | S_IWGRP,
-	mdss_fb_get_idle_time, mdss_fb_set_idle_time);
+static DEVICE_ATTR(idle_time, S_IRUGO | S_IWUSR | S_IWGRP, mdss_fb_get_idle_time, mdss_fb_set_idle_time);
 static DEVICE_ATTR(idle_notify, S_IRUGO, mdss_fb_get_idle_notify, NULL);
 static DEVICE_ATTR(rgb, S_IRUGO | S_IWUSR | S_IWGRP, mdss_get_rgb, mdss_set_rgb);
 
@@ -544,12 +490,8 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	mfd->ext_ad_ctrl = -1;
 	mfd->bl_level = 0;
 	mfd->bl_scale = 1024;
-#if defined(CONFIG_FB_MSM_MDSS_S6E8AA0A_HD_PANEL)
-  mfd->bl_min_lvl = 20;
-#else
-	mfd->bl_min_lvl = 0;
+	mfd->bl_min_lvl = 30;
 
-#endif
 	mfd->fb_imgType = MDP_RGBA_8888;
 
 	mfd->pdev = pdev;
@@ -561,9 +503,6 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	mutex_init(&mfd->lock);
 	mutex_init(&mfd->bl_lock);
 
-#if defined(CONFIG_MACH_S3VE3G_EUR) && defined(CONFIG_ESD_ERR_FG_RECOVERY)
-	mutex_init(&esd_lock);
-#endif
 	mutex_init(&mfd->power_state);
 	mutex_init(&mfd->ctx_lock);
 	fbi_list[fbi_list_index++] = fbi;
@@ -600,9 +539,7 @@ static int mdss_fb_probe(struct platform_device *pdev)
 
 	mdss_fb_create_sysfs(mfd);
 	mdss_fb_send_panel_event(mfd, MDSS_EVENT_FB_REGISTERED, fbi);
-#ifdef CONFIG_FB_MSM_CAMERA_CSC
-	mdp4_reg_csc_fs(mfd);
-#endif
+
 
 	mfd->mdp_sync_pt_data.fence_name = "mdp-fence";
 	if (mfd->mdp_sync_pt_data.timeline == NULL) {
@@ -698,32 +635,37 @@ static int mdss_fb_suspend_sub(struct msm_fb_data_type *mfd)
 
 	printk("mdss_fb suspend index=%d\n", mfd->index);
 	isSuspending = 1;
-	mdss_fb_pan_idle(mfd);
-	ret = mdss_fb_send_panel_event(mfd, MDSS_EVENT_SUSPEND, NULL);
-	if (ret) {
-		pr_warn("unable to suspend fb%d (%d)\n", mfd->index, ret);
-		return ret;
-	}
-
-	mfd->suspend.op_enable = mfd->op_enable;
-	mfd->suspend.panel_power_on = mfd->panel_power_on;
-
-	if (mfd->op_enable) {
-		printk ("mdss_fb suspend: blanking into VSYNC\n");
-		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN
-							/*FB_BLANK_VSYNC_SUSPEND*/, mfd->fbi,
-							mfd->suspend.op_enable);
-
+	if (mfd->index == 0 && globalALPMMode == 1){
+		printk ("FB: Never shut down the primary MFD!\n");
+		return 0;
+		}
+	else {
+		mdss_fb_pan_idle(mfd);
+		ret = mdss_fb_send_panel_event(mfd, MDSS_EVENT_SUSPEND, NULL);
 		if (ret) {
-			isSuspending = 0;
-			pr_warn("can't turn off display!\n");
+			pr_warn("unable to suspend fb%d (%d)\n", mfd->index, ret);
 			return ret;
 		}
-		mfd->op_enable = false;
-		fb_set_suspend(mfd->fbi, FBINFO_STATE_SUSPENDED);
-	}
-	isSuspending = 0;
+
+		mfd->suspend.op_enable = mfd->op_enable;
+		mfd->suspend.panel_power_on = mfd->panel_power_on;
+
+		if (mfd->op_enable) {
+			printk ("mdss_fb suspend: blanking into VSYNC\n");
+			ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, mfd->fbi,
+							mfd->suspend.op_enable);
+
+			if (ret) {
+				isSuspending = 0;
+				pr_warn("can't turn off display!\n");
+				return ret;
+			}
+			mfd->op_enable = false;
+			fb_set_suspend(mfd->fbi, FBINFO_STATE_SUSPENDED);
+		}
+
 	return 0;
+	}
 }
 
 static int mdss_fb_resume_sub(struct msm_fb_data_type *mfd)
@@ -732,33 +674,42 @@ static int mdss_fb_resume_sub(struct msm_fb_data_type *mfd)
 
 	if ((!mfd) || (mfd->key != MFD_KEY))
 		return 0;
+	
+	isSuspending = 0;
+	if (mfd->index == 0 && globalALPMMode == 1){
+		printk ("FB: No need to resume the primary MFD!\n");
+		//mdss_mdp_cx_ctrl
+		}
 
-	INIT_COMPLETION(mfd->power_set_comp);
-	mfd->is_power_setting = true;
-	pr_debug("mdss_fb resume index=%d\n", mfd->index);
+	else{
+		INIT_COMPLETION(mfd->power_set_comp);
+		mfd->is_power_setting = true;
+		pr_debug("mdss_fb resume index=%d\n", mfd->index);
 
-	mdss_fb_pan_idle(mfd);
-	ret = mdss_fb_send_panel_event(mfd, MDSS_EVENT_RESUME, NULL);
-	if (ret) {
-		pr_warn("unable to resume fb%d (%d)\n", mfd->index, ret);
-		return ret;
-	}
+		mdss_fb_pan_idle(mfd);
+		ret = mdss_fb_send_panel_event(mfd, MDSS_EVENT_RESUME, NULL);
+		if (ret) {
+			pr_warn("unable to resume fb%d (%d)\n", mfd->index, ret);
+			return ret;
+		}
 
-	/* resume state var recover */
-	mfd->op_enable = mfd->suspend.op_enable;
+		/* resume state var recover */
+		mfd->op_enable = mfd->suspend.op_enable;
 
-	if (mfd->suspend.panel_power_on) {
-		ret = mdss_fb_blank_sub(FB_BLANK_UNBLANK, mfd->fbi,
+
+		if (mfd->suspend.panel_power_on) {
+			ret = mdss_fb_blank_sub(FB_BLANK_UNBLANK, mfd->fbi,
 					mfd->op_enable);
-		if (ret)
-			pr_warn("can't turn on display!\n");
-		else
-			fb_set_suspend(mfd->fbi, FBINFO_STATE_RUNNING);
-	}
-	mfd->is_power_setting = false;
-	complete_all(&mfd->power_set_comp);
+			if (ret)
+				pr_warn("can't turn on display!\n");
+			else
+				fb_set_suspend(mfd->fbi, FBINFO_STATE_RUNNING);
+		}
+		mfd->is_power_setting = false;
+		complete_all(&mfd->power_set_comp);
 
-	return ret;
+		}
+	return ret;	
 }
 
 #if defined(CONFIG_PM) && !defined(CONFIG_PM_SLEEP)
@@ -797,10 +748,7 @@ static int mdss_fb_pm_suspend(struct device *dev)
 		return -ENODEV;
 
 	dev_dbg(dev, "display pm suspend\n");
-	if(mfd->panel_info->type == DTV_PANEL) {
-		dev_dbg(dev, "Ignore Suspend\n");
-		return 0;
-	}
+
 	return mdss_fb_suspend_sub(mfd);
 }
 
@@ -812,11 +760,16 @@ static int mdss_fb_pm_resume(struct device *dev)
 
 	dev_dbg(dev, "display pm resume\n");
 
+	/*
+	 * It is possible that the runtime status of the fb device may
+	 * have been active when the system was suspended. Reset the runtime
+	 * status to suspended state after a complete system resume.
+	 */
+	pm_runtime_disable(dev);
+	pm_runtime_set_suspended(dev);
+	pm_runtime_enable(dev);
 
-	if(mfd->panel_info->type == DTV_PANEL) {
-		dev_dbg(dev, "Ignore Resume\n");
-		return 0;
-	}
+
 	return mdss_fb_resume_sub(mfd);
 }
 #endif
@@ -911,9 +864,6 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 			mfd->bl_level = bkl_lvl;
 			return;
 		}
-#if defined(CONFIG_MACH_S3VE3G_EUR)
-		if(mfd->panel_power_on == true)
-#endif
 		pdata->set_backlight(pdata, temp);
 		mfd->bl_level = bkl_lvl;
 		mfd->bl_level_old = temp;
@@ -970,15 +920,17 @@ int mdss_fb_manage_panel_alpm(struct msm_fb_data_type *mfd, int blank_mode)
 			if (isSuspending == 0 && alpmEvent == 0){
 				printk ("FB Blank: Enabling ALPM Mode\n");
 				ret = mfd->panel_info->alpm_event(ALPM_MODE_ON);
-			}
+				globalALPMMode = 1;
+				}
 			break;
 		case FB_BLANK_UNBLANK:
 			if (isSuspending == 0 && alpmEvent == 1){
 				if (alpmEvent) {
 					printk ("FB: Disabling ALPM mode\n");
 					ret = mfd->panel_info->alpm_event(MODE_OFF);
+					globalALPMMode = 0;
+					}
 				}
-			}
 			break;
 		default:
 			printk ("FB ALPM Manager: Not doing anything. Blank Mode is %d", blank_mode);
@@ -995,12 +947,13 @@ int mdss_fb_blank_blank(struct msm_fb_data_type *mfd, int blank_mode)
     mutex_lock(&mfd->ctx_lock);
 	printk ("FB Blank Blank: START\n");
 	if (mfd->panel_power_on && mfd->mdp.off_fnc) {
-		
 		printk("FB Blank Blank: Running!\n");
+
 		mutex_lock(&mfd->update.lock);
 		mfd->update.type = NOTIFY_TYPE_SUSPEND;
 		mutex_unlock(&mfd->update.lock);
 		del_timer(&mfd->no_update.timer);
+		mfd->update.is_suspend = 1;
 		mfd->no_update.value = NOTIFY_TYPE_SUSPEND;
 		complete(&mfd->no_update.comp);
 
@@ -1063,6 +1016,7 @@ int mdss_fb_blank_unblank(struct msm_fb_data_type *mfd, int blank_mode)
 			mfd->panel_info->panel_dead = false;
 		}
 		mutex_lock(&mfd->update.lock);
+		mfd->update.is_suspend = 0;
 		mfd->update.type = NOTIFY_TYPE_UPDATE;
 		mutex_unlock(&mfd->update.lock);
 		/* Start the work thread to signal idle time */
@@ -1095,43 +1049,26 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	pr_info("FB BlankSub begin: fb: %d \n BlankMode: %d \n PreviousBlank: %d \n",
 	mfd->panel_info->fb_num, blank_mode, previousBlankMode);
 	
-	/*if (previousBlankMode == FB_BLANK_VSYNC_SUSPEND && blank_mode == FB_BLANK_VSYNC_SUSPEND){
-		printk ("FB Blank: FB Mode is the same as it was!\n");
-		return -EPERM;
-	}*/
 	mfd->blank_mode = blank_mode;
 	switch (blank_mode) {
 		case FB_BLANK_UNBLANK:
 			printk ("FB Blank: UNBLANK\n");
-			if (previousBlankMode == FB_BLANK_NORMAL && presentBlankMode == FB_BLANK_VSYNC_SUSPEND){
-				ret = mdss_fb_manage_panel_alpm(mfd, blank_mode);
-				ret = mdss_fb_blank_blank(mfd, FB_BLANK_POWERDOWN);
-				previousBlankMode = FB_BLANK_HSYNC_SUSPEND;
-				presentBlankMode = FB_BLANK_VSYNC_SUSPEND
-			}
-				
-			
-			
-			// If I set the bits for MODE_OFF, the next time the panel wakes
-			// should trigger the ALPM Mode Off and reset the panel to a sane state
-			// Should is the hopeful word here
+
 			ret = mdss_fb_manage_panel_alpm(mfd, blank_mode);
 			ret = mdss_fb_blank_unblank(mfd, blank_mode);
 			break;
 
 		case FB_BLANK_NORMAL:
 			printk ("FB Blank: BLANK NORMAL\n");
-			ret = mdss_fb_blank_unblank(mfd, blank_mode);
+			if (globalALPMMode)
+				ret = mdss_fb_manage_panel_alpm(mfd, blank_mode);
+			ret = mdss_fb_blank_blank(mfd, blank_mode);
 			break;
 
 		case FB_BLANK_VSYNC_SUSPEND:
 			printk ("FB Blank: ALPM Mode\n");
-			// This is fucking off with my blank states, so turn it off for now
-		/*	if (previousBlankMode == FB_BLANK_POWERDOWN){
-				printk ("FB Blank: Waking up to suspend\n"); 
-				ret = mdss_fb_blank_unblank(mfd, FB_BLANK_UNBLANK);
-				}*/
-			ret = mdss_fb_manage_panel_alpm(mfd, blank_mode);
+			if (!globalALPMMode)
+				ret = mdss_fb_manage_panel_alpm(mfd, blank_mode);
 			printk ("FB Blank: Panel was in %i mode, blanking directly\n", blank_mode);
 			ret = mdss_fb_blank_blank(mfd, blank_mode);
 			break;
@@ -1160,9 +1097,7 @@ static int mdss_fb_blank(int blank_mode, struct fb_info *info)
 
 	if (mfd->op_enable == 0) {
 		printk("FB Blank: Establishing power mode for suspend\n");
-		if (blank_mode == FB_BLANK_UNBLANK ||
-			/*blank_mode == FB_BLANK_VSYNC_SUSPEND || */
-			blank_mode == FB_BLANK_NORMAL) 
+		if (blank_mode == FB_BLANK_UNBLANK)
 			mfd->suspend.panel_power_on = true;
 		else
 			mfd->suspend.panel_power_on = false;
@@ -1300,6 +1235,7 @@ static int mdss_fb_alloc_fbmem_iommu(struct msm_fb_data_type *mfd, int dom)
 					    &mfd->iova);
 	pr_info("allocating %u bytes at %p (%lx phys) for fb %d\n",
 		 size, virt, phys, mfd->index);
+
 
 	mfd->fbi->screen_base = virt;
 	mfd->fbi->fix.smem_start = phys;
@@ -1717,9 +1653,7 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 	}
 
 	if (!mfd->ref_cnt) {
-#if defined(CONFIG_WHITE_PANEL)
-		mdss_fb_set_backlight(mfd, 0);
-#endif
+
 		if (mfd->disp_thread) {
 			kthread_stop(mfd->disp_thread);
 			mfd->disp_thread = NULL;
@@ -1770,13 +1704,7 @@ void mdss_fb_wait_for_fence(struct msm_sync_pt_data *sync_pt_data)
 	int i, ret = 0;
 
 	pr_debug("%s: wait for fences\n", sync_pt_data->fence_name);
-#if defined (CONFIG_FB_MSM_MIPI_SAMSUNG_TFT_VIDEO_WQXGA_PT_PANEL) || \
-	defined (CONFIG_FB_MSM8x26_MDSS_CHECK_LCD_CONNECTION)
-	if (get_lcd_attached() == 0) {
-		pr_debug("%s : lcd is not attached..\n",__func__);
-		return;
-	}
-#endif
+
 	mutex_lock(&sync_pt_data->sync_mutex);
 	/*
 	 * Assuming that acq_fen_cnt is sanitized in bufsync ioctl
@@ -2455,14 +2383,7 @@ static int mdss_fb_handle_buf_sync_ioctl(struct msm_sync_pt_data *sync_pt_data,
 	int retire_fen_fd;
 	int val;
 
-#if defined (CONFIG_FB_MSM_MIPI_SAMSUNG_TFT_VIDEO_WQXGA_PT_PANEL)|| \
-	defined (CONFIG_FB_MSM8x26_MDSS_CHECK_LCD_CONNECTION)
-	if (get_lcd_attached() == 0) {
-		pr_debug("%s : lcd is not attached..\n",__func__);
-		return 0;
-	}
-#endif
-
+	
 	if ((buf_sync->acq_fen_fd_cnt > MDP_MAX_FENCE_FD) ||
 				(sync_pt_data->timeline == NULL))
 		return -EINVAL;
@@ -2474,6 +2395,11 @@ static int mdss_fb_handle_buf_sync_ioctl(struct msm_sync_pt_data *sync_pt_data,
 		pr_err("%s: copy_from_user failed", sync_pt_data->fence_name);
 		return ret;
 	}
+	/* Code TEST 04/07/2016 */
+/*	i = mdss_fb_wait_for_fence(sync_pt_data);
+	if (i > 0)
+		pr_warn("%s: waited on %d active fences\n",
+				sync_pt_data->fence_name, i);	*/
 
 	if (sync_pt_data->acq_fen_cnt) {
 		pr_warn("%s: currently %d fences active. waiting...\n",
@@ -2747,7 +2673,7 @@ static int mdss_fb_register_extra_panel(struct platform_device *pdev,
 				dev_name(&pdev->dev));
 		return -EEXIST;
 	}
-
+/*
 	if (((fb_pdata->panel_info.type != MIPI_VIDEO_PANEL) ||
 		(pdata->panel_info.type != MIPI_VIDEO_PANEL)) &&
 		((fb_pdata->panel_info.type != MIPI_CMD_PANEL) ||
@@ -2755,7 +2681,7 @@ static int mdss_fb_register_extra_panel(struct platform_device *pdev,
 		pr_err("Split panel not supported for panel type %d\n",
 				pdata->panel_info.type);
 		return -EINVAL;
-	}
+	}*/
 
 	fb_pdata->next = pdata;
 
@@ -2887,3 +2813,27 @@ int __init mdss_fb_init(void)
 }
 
 module_init(mdss_fb_init);
+
+int mdss_fb_suspres_panel(struct device *dev, void *data)
+{
+	struct msm_fb_data_type *mfd;
+	int rc;
+	u32 event;
+
+	if (!data) {
+		pr_err("Device state not defined\n");
+		return -EINVAL;
+	}
+	mfd = dev_get_drvdata(dev);
+	if (!mfd)
+		return 0;
+
+	event = *((bool *) data) ? MDSS_EVENT_RESUME : MDSS_EVENT_SUSPEND;
+
+	rc = mdss_fb_send_panel_event(mfd, event, NULL);
+	if (rc)
+		pr_warn("unable to %s fb%d (%d)\n",
+			event == MDSS_EVENT_RESUME ? "resume" : "suspend",
+			mfd->index, rc);
+	return rc;
+}

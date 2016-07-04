@@ -448,6 +448,20 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 				panel_data);
 	pinfo = &(ctrl->panel_data.panel_info);
 #ifdef DISPLAY_ALPM_MODES
+
+	if (pinfo->alpm_event){
+		printk("oled: Panel ON, Alpm_Event is true\n");
+
+		if (!pinfo->alpm_event(CHECK_PREVIOUS_STATUS)){
+			printk ("oled: Panel wasn't in ALPM mode!\n");
+			mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
+			}
+	}
+	else{
+		printk ("oled: No ALPM event, display was powered down\n");
+		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
+	}
+
 /* ALPM Mode Change */
 	if (pinfo->alpm_event) {
 		printk ("oled: %s : alpm_event returned true\n", __func__);
@@ -455,7 +469,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		if (!pinfo->alpm_event(CHECK_PREVIOUS_STATUS)\
 				&& pinfo->alpm_event(CHECK_CURRENT_STATUS)) {
 			/* Turn On ALPM Mode */
-			mdss_dsi_panel_cmds_send(ctrl, &msd.alpm_on_cmds);
+			panel_alpm_on(1);
 			pinfo->alpm_event(STORE_CURRENT_STATUS);
 			pr_info("oled: [ALPM_DEBUG] %s: Send ALPM mode on cmds\n", __func__);
 		} else if (pinfo->alpm_event(CHECK_CURRENT_STATUS)\
@@ -466,16 +480,10 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		} else if (!pinfo->alpm_event(CHECK_CURRENT_STATUS)\
 					&& pinfo->alpm_event(CHECK_PREVIOUS_STATUS)) {
 			/* Turn Off ALPM Mode */
-			mdss_dsi_panel_cmds_send(ctrl, &msd.alpm_off_cmds);
+			panel_alpm_on(0);
 			pinfo->alpm_event(CLEAR_MODE_STATUS);
 			pr_info("oled: [ALPM_DEBUG] %s: Send ALPM off cmds\n", __func__);
-		} else	if (!pinfo->alpm_event(CHECK_PREVIOUS_STATUS)){
-			printk ("oled: %s: Sending on_cmds\n", __func__);
-			mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
-			}
-	}else{ // NO ALPM Event received (display was really off)
-		printk ("oled: Turn on the display\n");
-		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
+		}
 	}
 #else /* If ALPM is not used, turn on the lcd */
 	mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
@@ -513,6 +521,7 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
 	struct mdss_panel_info *pinfo = NULL;
+
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -1342,7 +1351,6 @@ static int mdss_dsi_panel_set_power(struct lcd_device *ld, int power)
 
 	if (msdd->power == power) {
 		printk ("oled: Set Power: Power mode is the same as it was before\n");
-		//ret = -EINVAL;
 		return -EINVAL;
 		}
 
@@ -1683,7 +1691,7 @@ u8 panel_alpm_handler(u8 flag)
 			current_status = ALPM_MODE_ON;
 			break;
 		case NORMAL_MODE_ON:
-			printk ("oled: NORMAL MODE ON (skipped!)\n");
+			pr_debug ("oled: NORMAL MODE ON (skipped!)\n");
 			/*current_status = NORMAL_MODE_ON;*/
 			break;
 		case MODE_OFF:
@@ -1691,24 +1699,24 @@ u8 panel_alpm_handler(u8 flag)
 			current_status = MODE_OFF;
 			break;
 		case CHECK_CURRENT_STATUS:
-			printk ("oled: ALPM Status: %i\n", current_status);
+			pr_debug ("oled: ALPM Status: %i\n", current_status);
 			ret = current_status;
 			break;
 		case CHECK_PREVIOUS_STATUS:
-			printk ("oled: ALPM Previous status: %i\n", previous_status);
+			pr_debug ("oled: ALPM Previous status: %i\n", previous_status);
 			ret = previous_status;
 			break;
 		case STORE_CURRENT_STATUS:
-			printk ("oled: ALPM Save State %i\n", current_status);
+			pr_debug ("oled: ALPM Save State %i\n", current_status);
 			previous_status = current_status;
 			break;
 		case CLEAR_MODE_STATUS:
-			printk ("oled: ALPM Reset state\n");
+			pr_debug ("oled: ALPM Reset state\n");
 			previous_status = 0;
 			current_status = 0;
 			break;
 		default:
-			printk ("oled: Default case hit!\n");
+			pr_err ("oled: Default case hit!\n");
 			break;
 	}
 	return ret;
@@ -1730,23 +1738,18 @@ static void panel_alpm_on(unsigned int enable)
 {
 	struct mdss_panel_data *pdata = msd.mpd;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
-	struct mdss_panel_info *pinfo = NULL;
+//	struct mdss_panel_info *pinfo = NULL;
 
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,	panel_data);
-
-	pinfo = &(ctrl_pdata->panel_data.panel_info);
+//	pinfo = &(ctrl_pdata->panel_data.panel_info);
 
 	if (enable) {
 		// Turn it on and fuck it.
 		mdss_dsi_panel_cmds_send(ctrl_pdata, &msd.alpm_on_cmds);
 		pr_info("oled: %s: ALPM ON.\n", __func__);
-
-		pinfo->alpm_event(STORE_CURRENT_STATUS);
 	} else {
-		// Turn it off and stfu.
 		mdss_dsi_panel_cmds_send(ctrl_pdata, &msd.alpm_off_cmds);
 		pr_info("oled: %s: ALPM OFF.\n", __func__);
-		pinfo->alpm_event(CLEAR_MODE_STATUS);
 	}
 
 	return;
@@ -2148,8 +2151,12 @@ int mdss_dsi_panel_init(struct device_node *node,
 		ctrl_pdata->panel_data.panel_info.partial_update_enabled = 0;
 		ctrl_pdata->partial_update_fnc = NULL;
 	}
-	/* Only supported in newer kernels / tizen variant */
-
+	/* Only supported in newer kernels / tizen variant
+	*  In this codebase, ULPS is always enabled, and gets
+	*  triggered if the ALPM function in the LCD is enabled
+	*  
+	*  So we don't need this anyway
+	*/ 
 
 	/*ctrl_pdata->panel_data.panel_info.ulps_feature_enabled =
 		of_property_read_bool(node, "qcom,ulps-enabled");

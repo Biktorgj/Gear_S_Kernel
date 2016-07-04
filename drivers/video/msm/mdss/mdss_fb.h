@@ -78,6 +78,7 @@ struct disp_info_notify {
 	struct completion comp;
 	struct mutex lock;
 	int value;
+	int is_suspend;
 };
 
 struct msm_sync_pt_data {
@@ -291,9 +292,8 @@ void mdss_fb_signal_timeline(struct msm_sync_pt_data *sync_pt_data);
 struct sync_fence *mdss_fb_sync_get_fence(struct sw_sync_timeline *timeline,
 				const char *fence_name, int val);
 int mdss_fb_register_mdp_instance(struct msm_mdp_interface *mdp);
-#if defined(CONFIG_MDNIE_TFT_MSM8X26) || defined (CONFIG_FB_MSM_MDSS_S6E8AA0A_HD_PANEL) || defined(CONFIG_MDNIE_VIDEO_ENHANCED)
-void mdss_negative_color(int is_negative_on);
-#endif
+int mdss_fb_suspres_panel(struct device *dev, void *data);
+
 int mdss_fb_dcm(struct msm_fb_data_type *mfd, int req_state);
 int mdss_fb_blank_unblank(struct msm_fb_data_type *mfd, int blank_mode);
 int mdss_fb_blank_blank(struct msm_fb_data_type *mfd, int blank_mode);

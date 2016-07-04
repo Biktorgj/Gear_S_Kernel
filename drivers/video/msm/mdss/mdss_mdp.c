@@ -161,6 +161,7 @@ static int mdss_mdp_parse_dt_smp(struct platform_device *pdev);
 static int mdss_mdp_parse_dt_misc(struct platform_device *pdev);
 static int mdss_mdp_parse_dt_ad_cfg(struct platform_device *pdev);
 
+
 u32 mdss_mdp_fb_stride(u32 fb_index, u32 xres, int bpp)
 {
 	/* The adreno GPU hardware requires that the pitch be aligned to
@@ -412,6 +413,7 @@ int mdss_mdp_bus_scale_set_quota(u64 ab_quota, u64 ib_quota)
 	} else {
 		int num_cases = mdp_bus_scale_table.num_usecases;
 		struct msm_bus_vectors *vect = NULL;
+
 
 		bus_idx = (mdss_res->current_bus_idx % (num_cases - 1)) + 1;
 
@@ -1699,6 +1701,7 @@ static int mdss_mdp_parse_dt_pipe(struct platform_device *pdev)
 	nids  += mdss_mdp_parse_dt_prop_len(pdev,
 			"qcom,mdss-pipe-dma-fetch-id");
 
+
 	npipes = mdata->nvig_pipes + mdata->nrgb_pipes + mdata->ndma_pipes;
 
 	if (npipes != nids) {
@@ -2048,9 +2051,7 @@ static int mdss_mdp_parse_dt_smp(struct platform_device *pdev)
 	rc = of_property_read_u32(pdev->dev.of_node,
 		"qcom,mdss-smp-mb-per-pipe", data);
 	mdata->smp_mb_per_pipe = (!rc ? data[0] : 0);
-#if defined(CONFIG_SEC_MATISSE_PROJECT)
-	mdata->smp_mb_per_pipe = 2;
-#endif
+
 
 	rc = 0;
 	arr = of_get_property(pdev->dev.of_node,
@@ -2116,6 +2117,7 @@ static int mdss_mdp_parse_dt_misc(struct platform_device *pdev)
 		"qcom,mdss-has-wfd-blk");
 	prop = of_find_property(pdev->dev.of_node, "batfet-supply", NULL);
 	mdata->batfet_required = prop ? true : false;
+
 
 	rc = of_property_read_u32(pdev->dev.of_node,
 			"qcom,max-bandwidth-low-kbps", &mdata->max_bw_low);
@@ -2404,6 +2406,14 @@ static int mdss_mdp_pm_resume(struct device *dev)
 
 	dev_dbg(dev, "display pm resume\n");
 
+	/*
+	 * It is possible that the runtime status of the mdp device may
+	 * have been active when the system was suspended. Reset the runtime
+	 * status to suspended state after a complete system resume.
+	 */
+	pm_runtime_disable(dev);
+	pm_runtime_set_suspended(dev);
+	pm_runtime_enable(dev);
 	return mdss_mdp_resume_sub(mdata);
 }
 #endif
@@ -2441,10 +2451,12 @@ static int mdss_mdp_resume(struct platform_device *pdev)
 static int mdss_mdp_runtime_resume(struct device *dev)
 {
 	struct mdss_data_type *mdata = dev_get_drvdata(dev);
+	bool device_on = true;
 	if (!mdata)
 		return -ENODEV;
 
 	dev_dbg(dev, "pm_runtime: resuming...\n");
+	device_for_each_child(dev, &device_on, mdss_fb_suspres_panel);
 
 	mdss_mdp_footswitch_ctrl(mdata, true);
 
@@ -2465,6 +2477,7 @@ static int mdss_mdp_runtime_idle(struct device *dev)
 static int mdss_mdp_runtime_suspend(struct device *dev)
 {
 	struct mdss_data_type *mdata = dev_get_drvdata(dev);
+	bool device_on = false;
 	if (!mdata)
 		return -ENODEV;
 	dev_dbg(dev, "pm_runtime: suspending...\n");
@@ -2473,6 +2486,7 @@ static int mdss_mdp_runtime_suspend(struct device *dev)
 		pr_err("MDP suspend failed\n");
 		return -EBUSY;
 	}
+	device_for_each_child(dev, &device_on, mdss_fb_suspres_panel);
 	mdss_mdp_footswitch_ctrl(mdata, false);
 
 	return 0;
