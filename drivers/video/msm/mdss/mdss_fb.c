@@ -84,9 +84,7 @@ static int mdss_fb_check_var(struct fb_var_screeninfo *var,
 static int mdss_fb_set_par(struct fb_info *info);
 static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			     int op_enable);
-#ifdef CONFIG_MDSS_FB_DPMS
 static int mdss_fb_suspend_sub(struct msm_fb_data_type *mfd);
-#endif
 static int mdss_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			 unsigned long arg);
 static int mdss_fb_mmap(struct fb_info *info, struct vm_area_struct *vma);
@@ -591,11 +589,9 @@ static int mdss_fb_remove(struct platform_device *pdev)
 	if (mfd->key != MFD_KEY)
 		return -EINVAL;
 
-#ifdef CONFIG_MDSS_FB_DPMS
 	if (mdss_fb_suspend_sub(mfd))
 		pr_err("msm_fb_remove: can't stop the device %d\n",
 			    mfd->index);
-#endif
 
 	/* remove /dev/fb* */
 	unregister_framebuffer(mfd->fbi);
@@ -627,7 +623,7 @@ static int mdss_fb_send_panel_event(struct msm_fb_data_type *mfd,
 	return 0;
 }
 
-#ifdef CONFIG_MDSS_FB_DPMS
+
 static int mdss_fb_suspend_sub(struct msm_fb_data_type *mfd)
 {
 	int ret = 0;
@@ -649,7 +645,7 @@ static int mdss_fb_suspend_sub(struct msm_fb_data_type *mfd)
 	mfd->suspend.panel_power_on = mfd->panel_power_on;
 
 	if (mfd->op_enable) {
-		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, mfd->fbi,
+		ret = mdss_fb_blank_sub(/*FB_BLANK_POWERDOWN*/FB_BLANK_VSYNC_SUSPEND, mfd->fbi,
 				mfd->suspend.op_enable);
 		if (ret) {
 			pr_warn("can't turn off display!\n");
@@ -768,7 +764,7 @@ static int mdss_fb_pm_resume(struct device *dev)
 static const struct dev_pm_ops mdss_fb_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(mdss_fb_pm_suspend, mdss_fb_pm_resume)
 };
-#endif
+
 
 static const struct of_device_id mdss_fb_dt_match[] = {
 	{ .compatible = "qcom,mdss-fb",},
@@ -779,17 +775,14 @@ EXPORT_COMPAT("qcom,mdss-fb");
 static struct platform_driver mdss_fb_driver = {
 	.probe = mdss_fb_probe,
 	.remove = mdss_fb_remove,
-#ifdef CONFIG_MDSS_FB_DPMS
 	.suspend = mdss_fb_suspend,
 	.resume = mdss_fb_resume,
-#endif
+
 	.shutdown = mdss_fb_shutdown,
 	.driver = {
 		.name = "mdss_fb",
 		.of_match_table = mdss_fb_dt_match,
-#ifdef CONFIG_MDSS_FB_DPMS
 		.pm = &mdss_fb_pm_ops,
-#endif
 	},
 };
 
@@ -973,20 +966,16 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	INIT_COMPLETION(mfd->blank_set_comp);
 	mfd->is_blank_setting = true;
 
+
+
 	switch (blank_mode) {
-	case FB_BLANK_UNBLANK:
 	case FB_BLANK_NORMAL:
+	case FB_BLANK_UNBLANK:
 		if (!mfd->panel_power_on && mfd->mdp.on_fnc) {
 			ret = mfd->mdp.on_fnc(mfd);
 			if (ret == 0) {
 				mfd->panel_power_on = true;
 				mfd->panel_info->panel_dead = false;
-#ifdef CONFIG_MSM_KGSL_DRM
-				event.index = mfd->index;
-				event.data = (void *)MSM_FB_DPMS_ON;
-				mdss_fb_nb_send_event(MSM_FB_SET_DPMS,
-					(void *)&event);
-#endif
 			}
 			mutex_lock(&mfd->update.lock);
 			mfd->update.type = NOTIFY_TYPE_UPDATE;
@@ -1001,7 +990,11 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 		mfd->dpms = blank_mode;
 		break;
 
+
 	case FB_BLANK_VSYNC_SUSPEND:
+
+
+
 		if (mfd->panel_power_on && mfd->mdp.off_fnc) {
 			int curr_pwr_state;
 
@@ -1035,6 +1028,7 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 		}
 		mfd->dpms = blank_mode;
 		break;
+
 	case FB_BLANK_POWERDOWN:
 		if (mfd->panel_power_on && mfd->mdp.off_fnc) {
 			int curr_pwr_state;
@@ -1095,11 +1089,19 @@ static int mdss_fb_blank(int blank_mode, struct fb_info *info)
 		mfd->index, mfd->dpms, blank_mode,
 		atomic_read(&mfd->commits_pending), current->comm);
 
+	if (blank_mode == FB_BLANK_UNBLANK && mfd->panel_info->alpm_event(ALPM_MODE_STATE)){
+		printk("Getting out of alpm mode\n");
+		mfd->panel_info->alpm_event(99);
+	}else if (blank_mode == FB_BLANK_VSYNC_SUSPEND && !mfd->panel_info->alpm_event(ALPM_MODE_STATE)){
+		printk("Entering alpm mode\n");
+		mfd->panel_info->alpm_event(98);
+	}
 	mdss_fb_pan_idle(mfd);
 
 	if (mfd->op_enable == 0) {
 		if (blank_mode == FB_BLANK_UNBLANK ||
-			blank_mode == FB_BLANK_NORMAL)
+			blank_mode == FB_BLANK_NORMAL ) /*|| 
+			blank_mode == FB_BLANK_VSYNC_SUSPEND)*/
 			mfd->suspend.panel_power_on = true;
 		else
 			mfd->suspend.panel_power_on = false;

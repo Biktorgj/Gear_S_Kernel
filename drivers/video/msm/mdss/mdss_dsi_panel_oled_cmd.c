@@ -1610,10 +1610,15 @@ static int panel_alpm_handler(int event)
 	case ALPM_NODE_STATE:
 		ret = msd.alpm_on;
 		break;
+	case 98:
+		msd.alpm_on = true;
+		break;
+	case 99:
+		msd.alpm_on = false;
+		break;
 	default:
 		break;
 	}
-
 	return ret;
 }
 

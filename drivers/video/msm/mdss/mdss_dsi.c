@@ -323,7 +323,7 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata)
 
 	panel_info = &pdata->panel_info;
 	alpm = panel_info->alpm_event && panel_info->alpm_event(ALPM_MODE_STATE);
-	pr_debug("%s:ulps[%d]alpm[%d]\n", __func__, ctrl_pdata->ulps, alpm);
+	pr_info("DSI OFF: %s:ulps[%d]alpm[%d]\n", __func__, ctrl_pdata->ulps, alpm);
 
 	if (alpm) {
 		ret = mdss_dsi_ulps_config(ctrl_pdata, 1);
@@ -359,7 +359,7 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata)
 		panel_info->mipi.frame_rate = panel_info->new_fps;
 
 out:
-	pr_debug("%s:ulps[%d]alpm[%d]ret[%d]\n", __func__, ctrl_pdata->ulps, alpm, ret);
+	pr_info("DSI OFF: End %s:ulps[%d]alpm[%d]ret[%d]\n", __func__, ctrl_pdata->ulps, alpm, ret);
 	return ret;
 }
 
@@ -694,7 +694,7 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 				panel_data);
 	pinfo = &pdata->panel_info;
 	alpm = pinfo->alpm_event && pinfo->alpm_event(ALPM_MODE_STATE);
-	pr_debug("%s:ulps[%d]alpm[%d]\n", __func__, ctrl_pdata->ulps, alpm);
+	pr_info("DSI ON: %s:ulps[%d]alpm[%d]\n", __func__, ctrl_pdata->ulps, alpm);
 
 	if (alpm) {
 		ret = mdss_dsi_ulps_config(ctrl_pdata, 0);
@@ -764,7 +764,7 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 		mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 0, __func__);
 
 out:
-	pr_info("%s:ulps[%d]ret[%d]\n", __func__, ctrl_pdata->ulps, ret);
+	pr_info("DSI ON: %s:ulps[%d]ret[%d]\n", __func__, ctrl_pdata->ulps, ret);
 	return ret;
 }
 

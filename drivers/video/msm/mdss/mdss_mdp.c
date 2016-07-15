@@ -2646,7 +2646,7 @@ out:
 	return ret;
 }
 
-#ifdef CONFIG_MDSS_FB_DPMS
+
 static inline int mdss_mdp_suspend_sub(struct mdss_data_type *mdata)
 {
 	mdata->suspend_fs_ena = mdata->fs_ena;
@@ -2739,7 +2739,6 @@ static int mdss_mdp_resume(struct platform_device *pdev)
 #define mdss_mdp_suspend NULL
 #define mdss_mdp_resume NULL
 #endif
-#endif
 
 #ifdef CONFIG_PM_RUNTIME
 static int mdss_mdp_runtime_resume(struct device *dev)
@@ -2793,9 +2792,7 @@ static int mdss_mdp_runtime_suspend(struct device *dev)
 #endif
 
 static const struct dev_pm_ops mdss_mdp_pm_ops = {
-#ifdef CONFIG_MDSS_FB_DPMS
 	SET_SYSTEM_SLEEP_PM_OPS(mdss_mdp_pm_suspend, mdss_mdp_pm_resume)
-#endif
 	SET_RUNTIME_PM_OPS(mdss_mdp_runtime_suspend,
 			mdss_mdp_runtime_resume,
 			mdss_mdp_runtime_idle)
@@ -2827,10 +2824,8 @@ MODULE_DEVICE_TABLE(of, mdss_mdp_dt_match);
 static struct platform_driver mdss_mdp_driver = {
 	.probe = mdss_mdp_probe,
 	.remove = mdss_mdp_remove,
-#ifdef CONFIG_MDSS_FB_DPMS
 	.suspend = mdss_mdp_suspend,
 	.resume = mdss_mdp_resume,
-#endif
 	.shutdown = NULL,
 	.driver = {
 		/*

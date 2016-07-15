@@ -708,6 +708,8 @@ static int mdss_mdp_cmd_set_partial_roi(struct mdss_mdp_ctl *ctl)
 int mdss_mdp_cmd_kickoff(struct mdss_mdp_ctl *ctl, void *arg)
 {
 	struct mdss_mdp_cmd_ctx *ctx;
+	struct mdss_panel_info *pinfo;
+	struct mdss_panel_data *pdata;
 	unsigned long flags;
 	int rc;
 
@@ -717,6 +719,9 @@ int mdss_mdp_cmd_kickoff(struct mdss_mdp_ctl *ctl, void *arg)
 		return -ENODEV;
 	}
 
+	pdata = ctl->panel_data;
+	pinfo = &pdata->panel_info;
+	
 	if (!get_lcd_attached()) {
 		pr_err("%s : lcd is not attached..\n",__func__);
 		return -ENODEV;
@@ -754,7 +759,11 @@ int mdss_mdp_cmd_kickoff(struct mdss_mdp_ctl *ctl, void *arg)
 	ctx->koff_cnt++;
 	spin_unlock_irqrestore(&ctx->clk_lock, flags);
 	mb();
-
+	
+	if (pinfo->alpm_event && pinfo->alpm_event(ALPM_MODE_STATE)){
+		printk ("Kickoff: Clearing ALPM Mode flag\n");
+//		pinfo->alpm_event(99);
+		}
 	return 0;
 }
 
