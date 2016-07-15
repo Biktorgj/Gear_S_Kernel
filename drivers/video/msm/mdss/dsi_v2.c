@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -57,8 +57,6 @@ static int dsi_panel_handler(struct mdss_panel_data *pdata, int enable)
 	int rc = 0;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 
-	pr_info("%s+: enable=%d\n", __func__, enable);
-
 	pr_debug("dsi_panel_handler enable=%d\n", enable);
 	if (!pdata)
 		return -ENODEV;
@@ -80,9 +78,6 @@ static int dsi_panel_handler(struct mdss_panel_data *pdata, int enable)
 		mdss_dsi_panel_reset(pdata, 0);
 		dsi_ctrl_gpio_free(ctrl_pdata);
 	}
-
-	pr_info("%s-:\n", __func__);
-
 	return rc;
 }
 
@@ -114,22 +109,15 @@ static int dsi_clk_ctrl(struct mdss_panel_data *pdata, int enable)
 	return rc;
 }
 
-
 static int dsi_event_handler(struct mdss_panel_data *pdata,
 				int event, void *arg)
 {
 	int rc = 0;
 
-
-
 	if (!pdata) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return -ENODEV;
 	}
-
-
-
-	pr_info("%s : event = %d\n", __func__, event);
 
 	switch (event) {
 	case MDSS_EVENT_UNBLANK:
@@ -229,12 +217,10 @@ int dsi_ctrl_gpio_request(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 
 void dsi_ctrl_gpio_free(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
- 
 	if (ctrl_pdata->disp_te_gpio_requested) {
 		gpio_free(ctrl_pdata->disp_te_gpio);
 		ctrl_pdata->disp_te_gpio_requested = 0;
 	}
- 
 }
 
 static int dsi_parse_vreg(struct device *dev, struct dss_module_power *mp)
@@ -387,7 +373,6 @@ error:
 novreg:
 	mp->num_vreg = 0;
 
-
 	return rc;
 }
 
@@ -463,7 +448,6 @@ int dsi_ctrl_config_init(struct platform_device *pdev,
 		return rc;
 	}
 
-
 	return 0;
 }
 int dsi_panel_device_register_v2(struct platform_device *dev,
@@ -528,7 +512,6 @@ int dsi_panel_device_register_v2(struct platform_device *dev,
 	}
 
 	ctrl_pdata->panel_data.event_handler = dsi_event_handler;
-
 
 	/*
 	 * register in mdp driver

@@ -16,7 +16,6 @@
 #include "mdss_mdp.h"
 #include "mdss_mdp_rotator.h"
 #include "mdss_panel.h"
-#include <linux/pm_runtime.h>
 
 enum mdss_mdp_writeback_type {
 	MDSS_MDP_WRITEBACK_TYPE_ROTATOR,
@@ -368,9 +367,6 @@ static int mdss_mdp_writeback_stop(struct mdss_mdp_ctl *ctl)
 
 		ctl->priv_data = NULL;
 		ctx->ref_cnt--;
-		
-		if(ctl->mdata != NULL)
-				pm_runtime_put_sync(&ctl->mdata->pdev->dev);
 	}
 
 	return 0;
@@ -431,7 +427,7 @@ static int mdss_mdp_wb_wait4comp(struct mdss_mdp_ctl *ctl, void *arg)
 		rc = 0;
 	}
 
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false); /* clock off */
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false, __func__); /* clock off */
 
 	ctx->comp_cnt--;
 
@@ -475,7 +471,7 @@ static int mdss_mdp_writeback_display(struct mdss_mdp_ctl *ctl, void *arg)
 	INIT_COMPLETION(ctx->wb_comp);
 	mdss_mdp_irq_enable(ctx->intr_type, ctx->intf_num);
 
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false, __func__);
 	mdss_mdp_ctl_write(ctl, MDSS_MDP_REG_CTL_START, 1);
 	wmb();
 
@@ -500,9 +496,6 @@ int mdss_mdp_writeback_start(struct mdss_mdp_ctl *ctl)
 			return -EBUSY;
 		}
 		ctx->ref_cnt++;
-		/* Stop PM Runtime to switch off MDP Regulator during Writeback */
-		if(ctl->mdata != NULL)	
-			pm_runtime_get_sync(&ctl->mdata->pdev->dev);
 	} else {
 		pr_err("invalid writeback mode %d\n", mem_sel);
 		return -EINVAL;
